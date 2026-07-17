@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"time"
@@ -49,6 +50,30 @@ func Handler(svc *service.Service) http.Handler {
 	return mux
 }
 
+// HandlerWithAuth builds the routes and, when token is non-empty, wraps them so
+// every request must present "Authorization: Bearer <token>".
+func HandlerWithAuth(svc *service.Service, token string) http.Handler {
+	return authMiddleware(token, Handler(svc))
+}
+
+// authMiddleware enforces bearer-token auth when token is non-empty. An empty
+// token (none configured) is a no-op, keeping localhost use friction-free; the
+// LAN deployment sets SUTRA_TOKEN to require it.
+func authMiddleware(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+	want := []byte("Bearer " + token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := []byte(r.Header.Get("Authorization"))
+		if subtle.ConstantTimeCompare(got, want) != 1 {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Run opens the service and serves HTTP on the configured address. It blocks
 // until ctx is cancelled (then it shuts down gracefully) or the server fails.
 func Run(ctx context.Context, cfg config.Config) error {
@@ -58,7 +83,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 	defer svc.Close()
 
-	srv := &http.Server{Addr: cfg.ListenAddr, Handler: Handler(svc)}
+	srv := &http.Server{Addr: cfg.ListenAddr, Handler: HandlerWithAuth(svc, cfg.Token)}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.ListenAndServe() }()
 

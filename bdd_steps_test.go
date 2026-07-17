@@ -115,7 +115,10 @@ func (w *world) setup() error {
 		}
 	}
 	os.Setenv("SUTRA_DB", filepath.Join(dir, "test.db"))
-	os.Unsetenv("SUTRA_TOKEN")
+	// Run the whole suite with bearer auth enabled: the daemon enforces it and
+	// the client (config.Load) sends it, so every scenario exercises the
+	// authenticated path (slice 2).
+	os.Setenv("SUTRA_TOKEN", "test-secret-token")
 	// Transcript ingest/discover is confined to the projects dir; point it at the
 	// scenario temp dir where session fixtures are written.
 	os.Setenv("SUTRA_PROJECTS_DIR", dir)
@@ -866,6 +869,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 
 	registerSlice3Steps(sc, w)
 	registerSlice8Steps(sc, w)
+	registerSlice2Steps(sc, w)
 	registerSlice7Steps(sc, w)
 }
 

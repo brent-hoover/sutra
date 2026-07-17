@@ -6,11 +6,13 @@ Feature: Daemon and clients
     When I run sutra serve
     Then it opens the store and serves HTTP on that address
 
+  @slice2
   Scenario: JSON API covers every operation
     Given the running daemon
     When any operation from the other epics is invoked over HTTP
     Then it accepts and returns JSON with one endpoint per operation
 
+  @slice2
   Scenario: CLI is a thin client
     Given the daemon is running
     When I run a CLI command
@@ -19,6 +21,7 @@ Feature: Daemon and clients
     When I run a CLI command
     Then it prints the API's raw JSON response
 
+  @slice2
   Scenario: Authenticated LAN access
     Given a configured bearer token
     When a client sends a request with the correct token
@@ -27,6 +30,7 @@ Feature: Daemon and clients
     When a client sends a request
     Then it is rejected with 401
 
+  @slice2
   Scenario: Use clients from another machine
     Given SUTRA_HOST set to the daemon's LAN address and a valid token
     When I run the CLI or TUI from another machine
