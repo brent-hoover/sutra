@@ -74,6 +74,10 @@ func (s *Server) linkTranscript(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listIssueTranscripts(w http.ResponseWriter, r *http.Request) {
 	transcripts, err := s.svc.TranscriptsForIssue(r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -86,6 +90,10 @@ func (s *Server) listIssueTranscripts(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) discoverTranscripts(w http.ResponseWriter, r *http.Request) {
 	found, err := s.svc.DiscoverTranscripts(r.URL.Query().Get("dir"))
+	if errors.Is(err, domain.ErrInvalidTranscript) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

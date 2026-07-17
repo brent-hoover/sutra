@@ -82,24 +82,36 @@ func (s *Store) DocumentsForIssue(issueID string) ([]domain.Document, error) {
 	return docs, rows.Err()
 }
 
-// UpdateDocument writes new content and updated_at for the document, returning
-// ErrNotFound if it does not exist.
-func (s *Store) UpdateDocument(id, content string, updatedAt time.Time) error {
-	res, err := s.db.Exec(
+// UpdateDocument writes new content and advances updated_at for the document,
+// returning ErrNotFound if it does not exist. The timestamp is generated inside
+// the write transaction so that, under concurrent updates serialized on the
+// single connection, the last write always carries the latest updated_at.
+func (s *Store) UpdateDocument(id, content string) (time.Time, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	res, err := tx.Exec(
 		`UPDATE documents SET content = ?, updated_at = ? WHERE id = ?`,
-		content, updatedAt.Format(timeFmt), id,
+		content, now.Format(timeFmt), id,
 	)
 	if err != nil {
-		return fmt.Errorf("update document: %w", err)
+		return time.Time{}, fmt.Errorf("update document: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("update document rows: %w", err)
+		return time.Time{}, fmt.Errorf("update document rows: %w", err)
 	}
 	if n == 0 {
-		return domain.ErrNotFound
+		return time.Time{}, domain.ErrNotFound
 	}
-	return nil
+	if err := tx.Commit(); err != nil {
+		return time.Time{}, err
+	}
+	return now, nil
 }
 
 // DeleteDocument removes the document, returning ErrNotFound if it does not exist.

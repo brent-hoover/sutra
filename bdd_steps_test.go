@@ -62,7 +62,7 @@ type world struct {
 	attached   []domain.Document // documents attached in the current scenario
 }
 
-var managedEnvKeys = []string{"SUTRA_LISTEN", "SUTRA_DB", "SUTRA_HOST", "SUTRA_TOKEN"}
+var managedEnvKeys = []string{"SUTRA_LISTEN", "SUTRA_DB", "SUTRA_HOST", "SUTRA_TOKEN", "SUTRA_PROJECTS_DIR"}
 
 func freeLoopbackAddr() (string, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -95,6 +95,9 @@ func (w *world) setup() error {
 	}
 	os.Setenv("SUTRA_DB", filepath.Join(dir, "test.db"))
 	os.Unsetenv("SUTRA_TOKEN")
+	// Transcript ingest/discover is confined to the projects dir; point it at the
+	// scenario temp dir where session fixtures are written.
+	os.Setenv("SUTRA_PROJECTS_DIR", dir)
 
 	// Start the daemon via the real Cobra `serve` command, retrying to tolerate
 	// the rare race where the chosen ephemeral port is claimed by another

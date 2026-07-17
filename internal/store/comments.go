@@ -22,6 +22,14 @@ func (s *Store) CreateComment(c domain.Comment, ledger []domain.LedgerEntry) err
 		return fmt.Errorf("insert comment: %w", err)
 	}
 
+	// A comment is a change to the issue: advance its updated_at in the same tx.
+	if _, err := tx.Exec(
+		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		c.CreatedAt.Format(timeFmt), c.IssueID,
+	); err != nil {
+		return fmt.Errorf("bump issue updated_at: %w", err)
+	}
+
 	if err := insertLedger(tx, ledger); err != nil {
 		return err
 	}

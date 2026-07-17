@@ -50,8 +50,7 @@ func (s *Service) UpdateDocument(id, content string) (domain.Document, error) {
 	if content == "" {
 		return domain.Document{}, domain.ErrInvalidDocument
 	}
-	now := time.Now().UTC()
-	if err := s.store.UpdateDocument(id, content, now); err != nil {
+	if _, err := s.store.UpdateDocument(id, content); err != nil {
 		return domain.Document{}, err
 	}
 	return s.store.GetDocument(id)

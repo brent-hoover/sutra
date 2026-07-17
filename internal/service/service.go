@@ -7,7 +7,8 @@ import (
 
 // Service implements Sutra's use-cases over the store.
 type Service struct {
-	store *store.Store
+	store       *store.Store
+	projectsDir string // transcript ingest/discover is confined to this directory
 }
 
 // New opens the store at the configured path and returns a Service.
@@ -16,7 +17,11 @@ func New(cfg config.Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: st}, nil
+	projectsDir := cfg.ProjectsDir
+	if projectsDir == "" {
+		projectsDir = config.DefaultProjectsDir()
+	}
+	return &Service{store: st, projectsDir: projectsDir}, nil
 }
 
 // Close releases the underlying store.

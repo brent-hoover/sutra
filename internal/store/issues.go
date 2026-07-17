@@ -36,38 +36,53 @@ func (s *Store) CreateIssue(issue domain.Issue, ledger []domain.LedgerEntry) err
 	return tx.Commit()
 }
 
-// UpdateIssue writes an issue's mutable columns and appends its ledger entries
-// in one transaction. Returns ErrNotFound if the issue does not exist.
-func (s *Store) UpdateIssue(issue domain.Issue, ledger []domain.LedgerEntry) error {
+// UpdateIssueTx reads the issue, hands it to mutate for in-place modification,
+// then writes the mutated columns and any ledger entries mutate returned — all
+// in one transaction, so the read-modify-write is atomic (no lost updates, no
+// resurrecting a concurrently soft-deleted issue). If mutate returns no ledger
+// entries the row is left untouched and the (unchanged) issue is returned.
+// Returns ErrNotFound if the issue does not exist, or any error mutate returns.
+func (s *Store) UpdateIssueTx(id string, mutate func(issue *domain.Issue) ([]domain.LedgerEntry, error)) (domain.Issue, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return domain.Issue{}, err
 	}
 	defer tx.Rollback()
 
-	res, err := tx.Exec(
+	issue, err := scanIssue(tx.QueryRow(`SELECT `+issueColumns+` FROM issues WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Issue{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.Issue{}, fmt.Errorf("get issue: %w", err)
+	}
+
+	ledger, err := mutate(&issue)
+	if err != nil {
+		return domain.Issue{}, err
+	}
+	if len(ledger) == 0 {
+		return issue, nil // nothing changed
+	}
+
+	if _, err := tx.Exec(
 		`UPDATE issues
 		 SET type = ?, status = ?, priority = ?, owner = ?, parent_id = ?, deleted_at = ?, updated_at = ?
 		 WHERE id = ?`,
 		string(issue.Type), string(issue.Status), string(issue.Priority), issue.Owner,
 		nullString(issue.ParentID), nullTime(issue.DeletedAt), issue.UpdatedAt.Format(timeFmt), issue.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("update issue: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return domain.ErrNotFound
+	); err != nil {
+		return domain.Issue{}, fmt.Errorf("update issue: %w", err)
 	}
 
 	if err := insertLedger(tx, ledger); err != nil {
-		return err
+		return domain.Issue{}, err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return domain.Issue{}, err
+	}
+	return issue, nil
 }
 
 const issueColumns = `id, subject, body, type, status, priority, owner, parent_id, deleted_at, created_at, updated_at`

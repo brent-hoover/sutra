@@ -3,12 +3,14 @@ package service
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/brent-hoover/sutra/internal/domain"
 )
@@ -22,6 +24,17 @@ const maxTitleLen = 120
 // store.UpsertTranscript). The stored transcript, with its messages, is
 // returned.
 func (s *Service) IngestTranscript(path string) (domain.Transcript, error) {
+	// Confine ingest to .jsonl files beneath the configured projects directory:
+	// the daemon must never be coaxed into reading arbitrary files off disk.
+	resolved, err := s.resolveWithinProjects(path)
+	if err != nil {
+		return domain.Transcript{}, err
+	}
+	if !strings.HasSuffix(resolved, ".jsonl") {
+		return domain.Transcript{}, errors.Join(domain.ErrInvalidTranscript,
+			fmt.Errorf("path %q is not a .jsonl file", path))
+	}
+
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return domain.Transcript{}, err
@@ -49,10 +62,9 @@ func (s *Service) IngestTranscript(path string) (domain.Transcript, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024) // tolerate long lines
 	seq := 0
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
+		// Ingestion is lossless: every line becomes exactly one Message and its
+		// Raw is the line verbatim (no trimming, blanks preserved).
+		line := scanner.Text()
 		msg, at := parseLine(line, seq)
 		t.Messages = append(t.Messages, msg)
 		// captured_at and title come from the first event that supplies them.
@@ -98,8 +110,13 @@ func (s *Service) LinkTranscript(transcriptID, issueID string) (domain.Transcrip
 	return s.store.LinkTranscript(transcriptID, issueID, entry)
 }
 
-// TranscriptsForIssue returns the transcripts linked to an issue.
+// TranscriptsForIssue returns the transcripts linked to an issue. It returns
+// ErrNotFound if the issue does not exist (so callers can 404 rather than
+// return an empty list for a bogus id).
 func (s *Service) TranscriptsForIssue(issueID string) ([]domain.Transcript, error) {
+	if _, err := s.store.GetIssue(issueID); err != nil {
+		return nil, err
+	}
 	return s.store.TranscriptsForIssue(issueID)
 }
 
@@ -109,11 +126,10 @@ func (s *Service) TranscriptsForIssue(issueID string) ([]domain.Transcript, erro
 func (s *Service) DiscoverTranscripts(dir string) ([]domain.DiscoveredTranscript, error) {
 	root := dir
 	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		root = filepath.Join(home, ".claude", "projects")
+		root = s.projectsDir
+	} else if _, err := s.resolveWithinProjects(dir); err != nil {
+		// A caller-supplied dir must live within the configured projects dir.
+		return nil, err
 	}
 	ingested, err := s.store.IngestedSessionIDs()
 	if err != nil {
@@ -151,13 +167,51 @@ func sessionIDFromPath(path string) string {
 	return strings.TrimSuffix(filepath.Base(path), ".jsonl")
 }
 
+// resolveProjectsDir returns the symlink-resolved, absolute projects directory.
+// It errors if that directory does not exist or is otherwise inaccessible.
+func (s *Service) resolveProjectsDir() (string, error) {
+	abs, err := filepath.Abs(s.projectsDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
+}
+
+// resolveWithinProjects resolves path to its absolute, symlink-free form and
+// verifies it lies within the configured projects directory. It returns the
+// resolved path, or an ErrInvalidTranscript-wrapped error if the path escapes
+// the projects directory or cannot be resolved.
+func (s *Service) resolveWithinProjects(path string) (string, error) {
+	root, err := s.resolveProjectsDir()
+	if err != nil {
+		return "", errors.Join(domain.ErrInvalidTranscript,
+			fmt.Errorf("projects directory %q is not accessible: %w", s.projectsDir, err))
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", errors.Join(domain.ErrInvalidTranscript, err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", errors.Join(domain.ErrInvalidTranscript,
+			fmt.Errorf("path %q is not accessible: %w", path, err))
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.Join(domain.ErrInvalidTranscript,
+			fmt.Errorf("path %q is outside the projects directory", path))
+	}
+	return resolved, nil
+}
+
 func deriveTitle(text string) string {
 	title := strings.TrimSpace(text)
 	if i := strings.IndexByte(title, '\n'); i >= 0 {
 		title = title[:i]
 	}
-	if len(title) > maxTitleLen {
-		title = strings.TrimSpace(title[:maxTitleLen])
+	// Truncate on a rune boundary so a multibyte character is never split.
+	if utf8.RuneCountInString(title) > maxTitleLen {
+		title = strings.TrimSpace(string([]rune(title)[:maxTitleLen]))
 	}
 	return title
 }
@@ -219,7 +273,8 @@ func parseLine(line string, seq int) (domain.Message, *time.Time) {
 func classifyRole(rawRole string, hasText, hasToolUse, hasToolResult bool) domain.Role {
 	switch rawRole {
 	case "user":
-		if hasToolResult && !hasText {
+		// A tool_result is a tool turn even when it carries output text.
+		if hasToolResult {
 			return domain.RoleTool
 		}
 		return domain.RoleUser

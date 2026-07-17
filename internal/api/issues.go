@@ -113,6 +113,10 @@ func (s *Server) deleteIssue(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) issueHistory(w http.ResponseWriter, r *http.Request) {
 	entries, err := s.svc.IssueHistory(r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

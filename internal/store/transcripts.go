@@ -48,6 +48,8 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 	defer tx.Rollback()
 
 	// Reuse the existing row (id + created_at) when the session already exists.
+	// issue_id is deliberately left untouched by the UPDATE below so that
+	// re-ingesting a linked transcript preserves its issue link.
 	var existingID, existingCreated string
 	err = tx.QueryRow(`SELECT id, created_at FROM transcripts WHERE session_id = ?`, t.SessionID).
 		Scan(&existingID, &existingCreated)
@@ -63,9 +65,6 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		); err != nil {
 			return domain.Transcript{}, fmt.Errorf("update transcript: %w", err)
 		}
-		if _, err := tx.Exec(`DELETE FROM messages WHERE transcript_id = ?`, t.ID); err != nil {
-			return domain.Transcript{}, fmt.Errorf("clear messages: %w", err)
-		}
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := tx.Exec(
 			`INSERT INTO transcripts (id, session_id, source_path, title, issue_id, captured_at, created_at)
@@ -79,6 +78,8 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		return domain.Transcript{}, fmt.Errorf("lookup transcript: %w", err)
 	}
 
+	// Upsert messages by (transcript_id, seq) so a re-ingest updates rows in
+	// place, preserving each existing message's id rather than recreating it.
 	for i := range t.Messages {
 		m := &t.Messages[i]
 		m.TranscriptID = t.ID
@@ -87,17 +88,27 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO messages (id, transcript_id, seq, role, text, raw, at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(transcript_id, seq) DO UPDATE SET
+			     role = excluded.role, text = excluded.text, raw = excluded.raw, at = excluded.at`,
 			m.ID, m.TranscriptID, m.Seq, string(m.Role), m.Text, m.Raw, nullTime(m.At),
 		); err != nil {
-			return domain.Transcript{}, fmt.Errorf("insert message: %w", err)
+			return domain.Transcript{}, fmt.Errorf("upsert message: %w", err)
 		}
+	}
+	// Drop any trailing rows left over from a previous, longer ingest.
+	if _, err := tx.Exec(
+		`DELETE FROM messages WHERE transcript_id = ? AND seq >= ?`, t.ID, len(t.Messages),
+	); err != nil {
+		return domain.Transcript{}, fmt.Errorf("prune messages: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
 		return domain.Transcript{}, err
 	}
-	return t, nil
+	// Return the stored state so the caller sees the persisted issue_id link and
+	// the preserved message ids, not the freshly-generated in-memory values.
+	return s.GetTranscript(t.ID)
 }
 
 // GetTranscript returns the transcript with the given id and its messages in
