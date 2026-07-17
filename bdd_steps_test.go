@@ -40,7 +40,10 @@ type world struct {
 	issue       domain.Issue
 	viewOut     string
 	err         error
+	envBackup   map[string]*string // original env values to restore in teardown
 }
+
+var managedEnvKeys = []string{"SUTRA_LISTEN", "SUTRA_DB", "SUTRA_HOST", "SUTRA_TOKEN"}
 
 func freeLoopbackAddr() (string, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -52,6 +55,8 @@ func freeLoopbackAddr() (string, error) {
 }
 
 func (w *world) setup() error {
+	*w = world{} // fresh per-scenario state
+
 	dir, err := os.MkdirTemp("", "sutra-bdd-")
 	if err != nil {
 		return err
@@ -62,7 +67,17 @@ func (w *world) setup() error {
 	if err != nil {
 		return err
 	}
-	// Exercise config.Load through the environment.
+	// Snapshot then override the environment so config.Load is exercised and
+	// prior values are restored in teardown (no cross-test order dependence).
+	w.envBackup = make(map[string]*string, len(managedEnvKeys))
+	for _, k := range managedEnvKeys {
+		if v, ok := os.LookupEnv(k); ok {
+			vv := v
+			w.envBackup[k] = &vv
+		} else {
+			w.envBackup[k] = nil
+		}
+	}
 	os.Setenv("SUTRA_LISTEN", addr)
 	os.Setenv("SUTRA_DB", filepath.Join(dir, "test.db"))
 	os.Setenv("SUTRA_HOST", "http://"+addr)
@@ -109,9 +124,13 @@ func (w *world) waitListening(addr string) error {
 }
 
 func (w *world) teardown() error {
-	os.Unsetenv("SUTRA_LISTEN")
-	os.Unsetenv("SUTRA_DB")
-	os.Unsetenv("SUTRA_HOST")
+	for k, v := range w.envBackup {
+		if v == nil {
+			os.Unsetenv(k)
+		} else {
+			os.Setenv(k, *v)
+		}
+	}
 
 	var errs []error
 	shutdownConfirmed := w.cancel == nil
