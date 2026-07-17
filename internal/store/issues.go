@@ -56,6 +56,11 @@ func (s *Store) UpdateIssueTx(id string, mutate func(issue *domain.Issue) ([]dom
 	if err != nil {
 		return domain.Issue{}, fmt.Errorf("get issue: %w", err)
 	}
+	// Hydrate labels so update/delete responses carry the derived labels
+	// projection, consistent with GetIssue/ListIssues.
+	if issue.Labels, err = labelsFor(tx, id); err != nil {
+		return domain.Issue{}, err
+	}
 
 	ledger, err := mutate(&issue)
 	if err != nil {

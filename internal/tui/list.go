@@ -44,17 +44,17 @@ func (m *Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // listView renders the issue list.
 func (m *Model) listView() string {
 	var b strings.Builder
-	b.WriteString(styles.title.Render("Sutra — issues"))
+	b.WriteString(styles.title.Render(truncate("Sutra — issues", m.width)))
 	b.WriteByte('\n')
 	if len(m.issues) == 0 {
-		b.WriteString(styles.dim.Render("(no issues) — press n to create one"))
+		b.WriteString(styles.dim.Render(truncate("(no issues) — press n to create one", m.width)))
 		b.WriteByte('\n')
 	}
 	// Render a height-bounded window around the cursor so the selected row stays
 	// on screen on a short terminal.
 	start, end := m.listWindow()
 	if start > 0 {
-		b.WriteString(styles.dim.Render(fmt.Sprintf("  ↑ %d more\n", start)))
+		b.WriteString(styles.dim.Render(truncate(fmt.Sprintf("  ↑ %d more", start), m.width)) + "\n")
 	}
 	for i := start; i < end; i++ {
 		is := m.issues[i]
@@ -80,7 +80,7 @@ func (m *Model) listView() string {
 		b.WriteString(cursor + line + "\n")
 	}
 	if end < len(m.issues) {
-		b.WriteString(styles.dim.Render(fmt.Sprintf("  ↓ %d more\n", len(m.issues)-end)))
+		b.WriteString(styles.dim.Render(truncate(fmt.Sprintf("  ↓ %d more", len(m.issues)-end), m.width)) + "\n")
 	}
 	b.WriteString(m.footer("↑/↓ move · enter open · n new · c child · e edit · r refresh · q quit"))
 	return b.String()
