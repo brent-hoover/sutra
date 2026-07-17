@@ -22,12 +22,17 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("create db dir: %w", err)
 		}
 	}
-	// WAL lets the daemon's clients read concurrently with a writer, and
-	// busy_timeout makes a second connection wait rather than fail on a lock.
-	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
+	}
+	// Single-user local daemon: serialize on one connection to avoid lock
+	// contention, and set pragmas after opening rather than encoding them into
+	// the path. WAL persists in the file; busy_timeout is per-connection.
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set pragmas: %w", err)
 	}
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {

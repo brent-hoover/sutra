@@ -1,7 +1,10 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"time"
 
 	"github.com/brent-hoover/sutra/internal/config"
 	"github.com/brent-hoover/sutra/internal/service"
@@ -21,12 +24,28 @@ func Handler(svc *service.Service) http.Handler {
 	return mux
 }
 
-// Run opens the service and serves HTTP on the configured address. Blocking.
-func Run(cfg config.Config) error {
+// Run opens the service and serves HTTP on the configured address. It blocks
+// until ctx is cancelled (then it shuts down gracefully) or the server fails.
+func Run(ctx context.Context, cfg config.Config) error {
 	svc, err := service.New(cfg)
 	if err != nil {
 		return err
 	}
 	defer svc.Close()
-	return http.ListenAndServe(cfg.ListenAddr, Handler(svc))
+
+	srv := &http.Server{Addr: cfg.ListenAddr, Handler: Handler(svc)}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.ListenAndServe() }()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	case err := <-serveErr:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
 }

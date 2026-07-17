@@ -1,40 +1,44 @@
 package main_test
 
 // Step definitions for implemented scenarios (tagged @slice1). Each scenario
-// runs against the real serve path: a live api.Run daemon on a loopback
-// listener, exercised through the HTTP client, backed by a throwaway SQLite
-// file. A second service handle on the same file verifies ledger writes.
+// drives the real binary surface: config.Load reads the environment, the
+// actual Cobra `serve` command starts the daemon (graceful shutdown on ctx
+// cancel), and `create`/`view` run as real Cobra commands whose --json output
+// is parsed. A second service handle on the same DB verifies ledger writes.
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cucumber/godog"
 
-	"github.com/brent-hoover/sutra/internal/api"
-	"github.com/brent-hoover/sutra/internal/client"
+	"github.com/brent-hoover/sutra/internal/cli"
 	"github.com/brent-hoover/sutra/internal/config"
 	"github.com/brent-hoover/sutra/internal/domain"
 	"github.com/brent-hoover/sutra/internal/service"
 )
 
 type world struct {
-	dir     string
-	verify  *service.Service // second handle for reading ledger state
-	serveCh chan error       // receives api.Run's exit error
-	client  *client.Client
-	subject string
-	body    string
-	issue   domain.Issue
-	viewed  domain.Issue
-	err     error
+	dir      string
+	cfg      config.Config
+	verify   *service.Service // second handle for reading ledger state
+	serveCtx context.Context
+	cancel   context.CancelFunc
+	serveCh  chan error // receives the serve command's exit error
+	subject  string
+	body     string
+	issue    domain.Issue
+	viewed   domain.Issue
+	err      error
 }
 
-// freeLoopbackAddr returns an unused 127.0.0.1:port for the daemon to bind.
 func freeLoopbackAddr() (string, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -50,23 +54,33 @@ func (w *world) setup() error {
 		return err
 	}
 	w.dir = dir
-	dbPath := filepath.Join(dir, "test.db")
 
 	addr, err := freeLoopbackAddr()
 	if err != nil {
 		return err
 	}
-	cfg := config.Config{ListenAddr: addr, DBPath: dbPath, Host: "http://" + addr}
+	// Exercise config.Load through the environment.
+	os.Setenv("SUTRA_LISTEN", addr)
+	os.Setenv("SUTRA_DB", filepath.Join(dir, "test.db"))
+	os.Setenv("SUTRA_HOST", "http://"+addr)
+	os.Unsetenv("SUTRA_TOKEN")
+	w.cfg = config.Load()
 
-	// Start the real daemon (config + api.Run + store open + listen).
+	// Start the daemon via the real Cobra `serve` command.
+	w.serveCtx, w.cancel = context.WithCancel(context.Background())
 	w.serveCh = make(chan error, 1)
-	go func() { w.serveCh <- api.Run(cfg) }()
+	go func() {
+		root := cli.NewRoot(w.cfg)
+		root.SetArgs([]string{"serve"})
+		root.SetOut(io.Discard)
+		root.SetErr(io.Discard)
+		w.serveCh <- root.ExecuteContext(w.serveCtx)
+	}()
 	if err := w.waitListening(addr); err != nil {
 		return err
 	}
 
-	w.client = client.New(cfg)
-	if w.verify, err = service.New(config.Config{DBPath: dbPath}); err != nil {
+	if w.verify, err = service.New(config.Config{DBPath: w.cfg.DBPath}); err != nil {
 		return err
 	}
 	return nil
@@ -77,7 +91,7 @@ func (w *world) waitListening(addr string) error {
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-w.serveCh:
-			return fmt.Errorf("daemon exited before listening: %w", err)
+			return fmt.Errorf("serve command exited before listening: %w", err)
 		default:
 		}
 		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
@@ -91,14 +105,41 @@ func (w *world) waitListening(addr string) error {
 }
 
 func (w *world) teardown() {
+	if w.cancel != nil {
+		w.cancel()
+		select {
+		case <-w.serveCh: // wait for the server to exit before removing files
+		case <-time.After(5 * time.Second):
+		}
+	}
 	if w.verify != nil {
 		w.verify.Close()
 	}
+	os.Unsetenv("SUTRA_LISTEN")
+	os.Unsetenv("SUTRA_DB")
+	os.Unsetenv("SUTRA_HOST")
 	if w.dir != "" {
 		os.RemoveAll(w.dir)
 	}
-	// The api.Run goroutine has no shutdown handle; it is left idle and reaped
-	// when the test binary exits. Each scenario binds a fresh port.
+}
+
+// runCLI runs the real root command with args and returns its stdout.
+func (w *world) runCLI(args ...string) (string, error) {
+	root := cli.NewRoot(w.cfg)
+	var out strings.Builder
+	root.SetOut(&out)
+	root.SetErr(io.Discard)
+	root.SetArgs(args)
+	err := root.ExecuteContext(context.Background())
+	return out.String(), err
+}
+
+func (w *world) createIssue(subject, body string) {
+	var out string
+	out, w.err = w.runCLI("create", "--subject", subject, "--body", body, "--json")
+	if w.err == nil {
+		w.err = json.Unmarshal([]byte(strings.TrimSpace(out)), &w.issue)
+	}
 }
 
 // InitializeScenario wires a fresh world per scenario and registers steps.
@@ -114,8 +155,8 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 
 	// Create an issue
 	sc.Step(`^no other input$`, func() error { return nil })
-	sc.Step(`^I create an issue with a subject and body$`, func(ctx context.Context) error {
-		w.issue, w.err = w.client.CreateIssue(ctx, "Skeleton subject", "Skeleton body")
+	sc.Step(`^I create an issue with a subject and body$`, func() error {
+		w.createIssue("Skeleton subject", "Skeleton body")
 		return nil
 	})
 	sc.Step(`^it is stored with a generated id and defaults type=task, status=open, priority=p2, and timestamps set$`, func() error {
@@ -133,9 +174,9 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^a new issue is created$`, func(ctx context.Context) error {
+	sc.Step(`^a new issue is created$`, func() error {
 		if w.issue.ID == "" {
-			w.issue, w.err = w.client.CreateIssue(ctx, "Skeleton subject", "Skeleton body")
+			w.createIssue("Skeleton subject", "Skeleton body")
 		}
 		return w.err
 	})
@@ -156,8 +197,8 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		w.subject, w.body = "Has a subject", ""
 		return nil
 	})
-	sc.Step(`^I try to create the issue$`, func(ctx context.Context) error {
-		w.issue, w.err = w.client.CreateIssue(ctx, w.subject, w.body)
+	sc.Step(`^I try to create the issue$`, func() error {
+		w.createIssue(w.subject, w.body)
 		return nil
 	})
 	sc.Step(`^it is rejected$`, func() error {
@@ -168,12 +209,17 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	})
 
 	// View an issue's core fields
-	sc.Step(`^a stored issue exists$`, func(ctx context.Context) error {
-		w.issue, w.err = w.client.CreateIssue(ctx, "View me", "the body to read back")
+	sc.Step(`^a stored issue exists$`, func() error {
+		w.createIssue("View me", "the body to read back")
 		return w.err
 	})
-	sc.Step(`^I view it by id$`, func(ctx context.Context) error {
-		w.viewed, w.err = w.client.GetIssue(ctx, w.issue.ID)
+	sc.Step(`^I view it by id$`, func() error {
+		out, err := w.runCLI("view", w.issue.ID, "--json")
+		if err != nil {
+			w.err = err
+			return nil
+		}
+		w.err = json.Unmarshal([]byte(strings.TrimSpace(out)), &w.viewed)
 		return nil
 	})
 	sc.Step(`^its core fields are returned$`, func() error {
@@ -190,15 +236,20 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	})
 
 	// Run the daemon
-	sc.Step(`^a config with a listen address and DB path$`, func() error { return nil })
-	sc.Step(`^I run sutra serve$`, func() error { return nil })
-	sc.Step(`^it opens the store and serves HTTP on that address$`, func(ctx context.Context) error {
-		issue, err := w.client.CreateIssue(ctx, "Ping", "Prove the daemon serves and the store is open")
-		if err != nil {
-			return fmt.Errorf("daemon did not serve a working request: %w", err)
+	sc.Step(`^a config with a listen address and DB path$`, func() error {
+		if w.cfg.ListenAddr == "" || w.cfg.DBPath == "" {
+			return fmt.Errorf("config not loaded")
 		}
-		if _, err := w.client.GetIssue(ctx, issue.ID); err != nil {
-			return fmt.Errorf("daemon did not read back from the store: %w", err)
+		return nil
+	})
+	sc.Step(`^I run sutra serve$`, func() error { return nil }) // started in setup via the real command
+	sc.Step(`^it opens the store and serves HTTP on that address$`, func() error {
+		w.createIssue("Ping", "Prove the daemon serves and the store is open")
+		if w.err != nil {
+			return fmt.Errorf("daemon did not serve a working request: %w", w.err)
+		}
+		if _, err := w.runCLI("view", w.issue.ID, "--json"); err != nil {
+			return fmt.Errorf("daemon did not read back through the store: %w", err)
 		}
 		return nil
 	})

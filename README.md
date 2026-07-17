@@ -16,8 +16,9 @@ Each slice is BDD-first: make its godog scenarios (in `features/`) go from
 red to green, then confirm the slice's Verify line.
 
 ```bash
-go test -count=1 -run TestArchitecture ./...   # architecture rules — green
-go test -count=1 -run TestFeatures ./...        # BDD specs — red until implemented
+go test ./...                                    # default: architecture + implemented BDD — green
+go test -count=1 -run TestImplemented ./...      # BDD for completed slices (@slice* tags) — green
+SUTRA_BACKLOG=1 go test -count=1 -run TestBacklog ./...  # full BDD backlog — red until implemented
 ```
 
 ## Docs

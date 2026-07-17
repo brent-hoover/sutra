@@ -14,7 +14,7 @@ func serveCmd(cfg config.Config) *cobra.Command {
 		Short: "Run the Sutra daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(cmd.ErrOrStderr(), "sutra serve: listening on %s (db %s)\n", cfg.ListenAddr, cfg.DBPath)
-			return api.Run(cfg)
+			return api.Run(cmd.Context(), cfg)
 		},
 	}
 }
