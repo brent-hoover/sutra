@@ -39,6 +39,17 @@ type world struct {
 	viewOut   string
 	err       error
 	envBackup map[string]*string // original env values to restore in teardown
+
+	// transcript-capture (slice 6) state
+	sessionID   string
+	sessionPath string
+	transcript  domain.Transcript
+	prevID      string
+	prevCount   int
+	projectDir  string
+	sessionA    string
+	sessionB    string
+	txOut       string
 }
 
 var managedEnvKeys = []string{"SUTRA_LISTEN", "SUTRA_DB", "SUTRA_HOST", "SUTRA_TOKEN"}
@@ -203,6 +214,52 @@ func (w *world) createIssue(subject, body string) {
 	}
 }
 
+// fixtureLines returns a small Claude-style JSONL transcript exercising a
+// user message, an assistant text reply, and a timestamp-less tool event.
+func fixtureLines() []string {
+	return []string{
+		`{"type":"user","message":{"role":"user","content":"Fix the login bug"},"timestamp":"2026-07-16T10:00:00Z"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I will fix it."}]},"timestamp":"2026-07-16T10:00:05Z"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{}}]}}`,
+	}
+}
+
+// writeSession writes a session .jsonl file under dir and returns its path.
+func writeSession(dir, sessionID string, lines []string) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, sessionID+".jsonl")
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// ingest ingests a session file through the real CLI and decodes the result.
+func (w *world) ingest(path string) error {
+	out, err := w.runCLI("transcript", "ingest", path, "--json")
+	w.err = err
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(strings.TrimSpace(out)), &w.transcript)
+}
+
+// ingestFixture writes the standard fixture under ~/.claude/projects-style
+// dirs inside the temp dir and ingests it.
+func (w *world) ingestFixture() error {
+	w.sessionID = "11111111-2222-3333-4444-555555555555"
+	dir := filepath.Join(w.dir, "projects", "-Users-me-proj")
+	path, err := writeSession(dir, w.sessionID, fixtureLines())
+	if err != nil {
+		return err
+	}
+	w.sessionPath = path
+	return w.ingest(path)
+}
+
 // InitializeScenario wires a fresh world per scenario and registers steps.
 func InitializeScenario(sc *godog.ScenarioContext) {
 	w := &world{}
@@ -317,6 +374,215 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		}
 		if _, err := w.runCLI("view", w.issue.ID, "--json"); err != nil {
 			return fmt.Errorf("daemon did not read back through the store: %w", err)
+		}
+		return nil
+	})
+
+	// Ingest a transcript
+	sc.Step(`^a session file under ~/\.claude/projects$`, func() error {
+		w.sessionID = "11111111-2222-3333-4444-555555555555"
+		dir := filepath.Join(w.dir, "projects", "-Users-me-proj")
+		path, err := writeSession(dir, w.sessionID, fixtureLines())
+		if err != nil {
+			return err
+		}
+		w.sessionPath = path
+		return nil
+	})
+	sc.Step(`^I ingest it$`, func() error { return w.ingest(w.sessionPath) })
+	sc.Step(`^a Transcript is stored with session_id, source_path, captured_at, and a title derived from the first user message$`, func() error {
+		if w.err != nil {
+			return fmt.Errorf("ingest failed: %w", w.err)
+		}
+		if w.transcript.SessionID != w.sessionID {
+			return fmt.Errorf("session_id = %q, want %q", w.transcript.SessionID, w.sessionID)
+		}
+		abs, _ := filepath.Abs(w.sessionPath)
+		if w.transcript.SourcePath != abs {
+			return fmt.Errorf("source_path = %q, want %q", w.transcript.SourcePath, abs)
+		}
+		if w.transcript.CapturedAt.IsZero() {
+			return fmt.Errorf("captured_at not set")
+		}
+		if w.transcript.Title != "Fix the login bug" {
+			return fmt.Errorf("title = %q, want derived from first user message", w.transcript.Title)
+		}
+		return nil
+	})
+	sc.Step(`^that file's lines$`, func() error { return nil })
+	sc.Step(`^ingestion runs$`, func() error { return nil })
+	sc.Step(`^each line becomes a Message with seq, role, extracted text, original raw, and at when present$`, func() error {
+		msgs := w.transcript.Messages
+		if len(msgs) != 3 {
+			return fmt.Errorf("expected 3 messages, got %d", len(msgs))
+		}
+		wantRoles := []domain.Role{domain.RoleUser, domain.RoleAssistant, domain.RoleTool}
+		for i, m := range msgs {
+			if m.Seq != i {
+				return fmt.Errorf("message %d has seq %d", i, m.Seq)
+			}
+			if m.Role != wantRoles[i] {
+				return fmt.Errorf("message %d role = %q, want %q", i, m.Role, wantRoles[i])
+			}
+			if m.Raw == "" {
+				return fmt.Errorf("message %d has empty raw", i)
+			}
+		}
+		if msgs[0].Text != "Fix the login bug" || msgs[1].Text != "I will fix it." {
+			return fmt.Errorf("extracted text mismatch: %q / %q", msgs[0].Text, msgs[1].Text)
+		}
+		if msgs[0].At == nil || msgs[1].At == nil {
+			return fmt.Errorf("expected timestamps on the first two messages")
+		}
+		if msgs[2].At != nil {
+			return fmt.Errorf("expected no timestamp on the timestamp-less tool event")
+		}
+		return nil
+	})
+
+	// Re-ingest is idempotent
+	sc.Step(`^a transcript already ingested$`, func() error {
+		if err := w.ingestFixture(); err != nil {
+			return err
+		}
+		w.prevID = w.transcript.ID
+		w.prevCount = len(w.transcript.Messages)
+		return nil
+	})
+	sc.Step(`^I ingest the same session_id again$`, func() error { return w.ingest(w.sessionPath) })
+	sc.Step(`^the existing Transcript and its Message rows are updated in place, not duplicated$`, func() error {
+		if w.transcript.ID != w.prevID {
+			return fmt.Errorf("re-ingest created a new transcript id %q (was %q)", w.transcript.ID, w.prevID)
+		}
+		if len(w.transcript.Messages) != w.prevCount {
+			return fmt.Errorf("message count changed: %d, want %d", len(w.transcript.Messages), w.prevCount)
+		}
+		// Read it back through the daemon to confirm the DB has no duplicates.
+		out, err := w.runCLI("transcript", "view", w.transcript.ID, "--json")
+		if err != nil {
+			return err
+		}
+		var stored domain.Transcript
+		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &stored); err != nil {
+			return err
+		}
+		if len(stored.Messages) != w.prevCount {
+			return fmt.Errorf("stored message count = %d, want %d (duplicated?)", len(stored.Messages), w.prevCount)
+		}
+		return nil
+	})
+
+	// Link a transcript to an issue
+	sc.Step(`^an ingested transcript and an issue$`, func() error {
+		if err := w.ingestFixture(); err != nil {
+			return err
+		}
+		w.createIssue("Linkable", "issue to link a transcript to")
+		return w.err
+	})
+	sc.Step(`^I link them$`, func() error {
+		out, err := w.runCLI("transcript", "link", w.transcript.ID, "--issue", w.issue.ID, "--json")
+		w.err = err
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal([]byte(strings.TrimSpace(out)), &w.transcript)
+	})
+	sc.Step(`^the transcript's issue_id is set and a LedgerEntry of kind linked is appended to the issue$`, func() error {
+		if w.transcript.IssueID == nil || *w.transcript.IssueID != w.issue.ID {
+			return fmt.Errorf("transcript issue_id = %v, want %q", w.transcript.IssueID, w.issue.ID)
+		}
+		history, err := w.verify.IssueHistory(w.issue.ID)
+		if err != nil {
+			return err
+		}
+		for _, e := range history {
+			if e.Kind == domain.LedgerLinked {
+				return nil
+			}
+		}
+		return fmt.Errorf("no LedgerEntry of kind linked found (%d entries)", len(history))
+	})
+
+	// View an issue's transcripts
+	sc.Step(`^an issue with linked transcripts$`, func() error {
+		if err := w.ingestFixture(); err != nil {
+			return err
+		}
+		w.createIssue("Owns transcripts", "issue that owns a transcript")
+		if w.err != nil {
+			return w.err
+		}
+		_, err := w.runCLI("transcript", "link", w.transcript.ID, "--issue", w.issue.ID, "--json")
+		return err
+	})
+	sc.Step(`^I view its transcripts$`, func() error {
+		w.txOut, w.err = w.runCLI("transcript", "list", "--issue", w.issue.ID)
+		return w.err
+	})
+	sc.Step(`^each linked Transcript appears with its title and captured_at$`, func() error {
+		if !strings.Contains(w.txOut, "Fix the login bug") {
+			return fmt.Errorf("list output missing title:\n%s", w.txOut)
+		}
+		if !strings.Contains(w.txOut, "2026-07-16") {
+			return fmt.Errorf("list output missing captured_at:\n%s", w.txOut)
+		}
+		return nil
+	})
+
+	// Read a transcript
+	sc.Step(`^an ingested transcript$`, func() error { return w.ingestFixture() })
+	sc.Step(`^I open it$`, func() error {
+		w.txOut, w.err = w.runCLI("transcript", "view", w.transcript.ID)
+		return w.err
+	})
+	sc.Step(`^its Message rows render in seq order by role, reconstructed from raw$`, func() error {
+		user := strings.Index(w.txOut, "Fix the login bug")
+		asst := strings.Index(w.txOut, "I will fix it.")
+		if user < 0 || asst < 0 || user > asst {
+			return fmt.Errorf("messages not rendered in seq order:\n%s", w.txOut)
+		}
+		for _, role := range []string{"user", "assistant", "tool"} {
+			if !strings.Contains(w.txOut, role) {
+				return fmt.Errorf("output missing role %q:\n%s", role, w.txOut)
+			}
+		}
+		// The timestamp-less tool event has no extracted text, so it must be
+		// reconstructed from its raw JSON line.
+		if !strings.Contains(w.txOut, "tool_use") {
+			return fmt.Errorf("tool message not reconstructed from raw:\n%s", w.txOut)
+		}
+		return nil
+	})
+
+	// Discover local transcripts
+	sc.Step(`^session files on disk$`, func() error {
+		w.projectDir = filepath.Join(w.dir, "discover")
+		w.sessionA = "aaaaaaaa-0000-0000-0000-000000000001"
+		w.sessionB = "bbbbbbbb-0000-0000-0000-000000000002"
+		pathA, err := writeSession(w.projectDir, w.sessionA, fixtureLines())
+		if err != nil {
+			return err
+		}
+		if _, err := writeSession(w.projectDir, w.sessionB, fixtureLines()); err != nil {
+			return err
+		}
+		// Ingest only A, leaving B not-ingested.
+		return w.ingest(pathA)
+	})
+	sc.Step(`^I list available transcripts, optionally by project dir$`, func() error {
+		w.txOut, w.err = w.runCLI("transcript", "discover", "--dir", w.projectDir)
+		return w.err
+	})
+	sc.Step(`^each file's session_id, path, and ingested state is shown$`, func() error {
+		if !strings.Contains(w.txOut, w.sessionA) || !strings.Contains(w.txOut, w.sessionB) {
+			return fmt.Errorf("discover output missing a session_id:\n%s", w.txOut)
+		}
+		if !strings.Contains(w.txOut, filepath.Join(w.projectDir, w.sessionA+".jsonl")) {
+			return fmt.Errorf("discover output missing a path:\n%s", w.txOut)
+		}
+		if !strings.Contains(w.txOut, "not-ingested") || !strings.Contains(w.txOut, "\tingested\t") {
+			return fmt.Errorf("discover output missing ingested state:\n%s", w.txOut)
 		}
 		return nil
 	})

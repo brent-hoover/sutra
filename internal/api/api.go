@@ -21,6 +21,12 @@ func Handler(svc *service.Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /issues", s.createIssue)
 	mux.HandleFunc("GET /issues/{id}", s.getIssue)
+	// Transcript capture (slice 6).
+	mux.HandleFunc("GET /issues/{id}/transcripts", s.listIssueTranscripts)
+	mux.HandleFunc("POST /transcripts", s.ingestTranscript)
+	mux.HandleFunc("GET /transcripts", s.discoverTranscripts)
+	mux.HandleFunc("GET /transcripts/{id}", s.getTranscript)
+	mux.HandleFunc("POST /transcripts/{id}/link", s.linkTranscript)
 	return mux
 }
 
