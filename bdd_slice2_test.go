@@ -1,12 +1,14 @@
 package main_test
 
 // Step definitions for the @slice2 transport-contract scenarios: every
-// operation is reachable as JSON over HTTP, the CLI is a thin JSON client that
-// makes exactly one request and prints the response verbatim, and bearer-token
-// auth gates LAN access. The harness runs with SUTRA_TOKEN set, so the daemon
-// enforces auth and the client sends it.
+// registered operation is reachable as JSON over HTTP; the CLI is a thin JSON
+// client that makes exactly one request and prints the response byte-for-byte;
+// bearer-token auth gates LAN access; and a client honors a configured remote
+// endpoint. The harness runs with SUTRA_TOKEN set, so the daemon enforces auth
+// and the client sends it.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,20 +23,36 @@ import (
 
 	"github.com/brent-hoover/sutra/internal/api"
 	"github.com/brent-hoover/sutra/internal/config"
-	"github.com/brent-hoover/sutra/internal/domain"
 	"github.com/brent-hoover/sutra/internal/service"
 )
 
 func registerSlice2Steps(sc *godog.ScenarioContext, w *world) {
 	var (
 		httpStatus    int
-		cliJSON       string
+		cliOut        string
 		cliReqs       int64
 		noTokenStatus int
+		remoteHits    int64
+		remoteIssueID string
+		remoteSvc     *service.Service
+		remoteSrv     *httptest.Server
+		remoteDir     string
 	)
 
-	// req sends an authorized request to the daemon and returns status,
-	// content-type, and body.
+	// Clean up the "remote machine" fixtures (if the scenario created them).
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		if remoteSrv != nil {
+			remoteSrv.Close()
+		}
+		if remoteSvc != nil {
+			remoteSvc.Close()
+		}
+		if remoteDir != "" {
+			os.RemoveAll(remoteDir)
+		}
+		return ctx, nil
+	})
+
 	req := func(method, path, body, token string) (int, string, []byte, error) {
 		var r io.Reader
 		if body != "" {
@@ -59,77 +77,125 @@ func registerSlice2Steps(sc *godog.ScenarioContext, w *world) {
 		return resp.StatusCode, resp.Header.Get("Content-Type"), buf, nil
 	}
 
-	// runCLICounted runs the CLI against an instrumented server (fresh store)
-	// that counts requests, so we can assert the CLI made exactly one.
-	runCLICounted := func(args ...string) (string, int64, error) {
-		dir, err := os.MkdirTemp("", "sutra-thin-")
+	// mustJSON asserts an endpoint returns a 2xx JSON response.
+	mustJSON := func(method, path, body string) ([]byte, error) {
+		st, ct, b, err := req(method, path, body, w.cfg.Token)
 		if err != nil {
-			return "", 0, err
+			return nil, err
 		}
-		defer os.RemoveAll(dir)
-		svc, err := service.New(config.Config{DBPath: filepath.Join(dir, "t.db"), ProjectsDir: filepath.Join(dir, "projects")})
-		if err != nil {
-			return "", 0, err
+		if st < 200 || st >= 300 {
+			return nil, fmt.Errorf("%s %s: status=%d body=%s", method, path, st, b)
 		}
-		defer svc.Close()
-		var count int64
-		h := api.HandlerWithAuth(svc, w.cfg.Token)
-		srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-			atomic.AddInt64(&count, 1)
-			h.ServeHTTP(rw, r)
-		}))
-		defer srv.Close()
-		saved := w.cfg.Host
-		w.cfg.Host = srv.URL
-		defer func() { w.cfg.Host = saved }()
-		out, err := w.runCLI(args...)
-		return out, atomic.LoadInt64(&count), err
+		if !strings.HasPrefix(ct, "application/json") {
+			return nil, fmt.Errorf("%s %s: content-type=%q, want application/json", method, path, ct)
+		}
+		if !json.Valid(b) {
+			return nil, fmt.Errorf("%s %s: body is not JSON: %s", method, path, b)
+		}
+		return b, nil
+	}
+	idOf := func(b []byte) string {
+		var v struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal(b, &v)
+		return v.ID
 	}
 
 	// --- JSON API covers every operation ---
 	sc.Step(`^the running daemon$`, func() error { return nil })
 	sc.Step(`^any operation from the other epics is invoked over HTTP$`, func() error {
-		// Create, then read back across several endpoints spanning the epics.
-		st, ct, body, err := req(http.MethodPost, "/issues", `{"subject":"over http","body":"b"}`, w.cfg.Token)
+		a, err := mustJSON(http.MethodPost, "/issues", `{"subject":"op cover","body":"b"}`)
 		if err != nil {
 			return err
 		}
-		if st != http.StatusCreated || !strings.HasPrefix(ct, "application/json") {
-			return fmt.Errorf("create: status=%d ct=%q", st, ct)
+		other, err := mustJSON(http.MethodPost, "/issues", `{"subject":"other","body":"b"}`)
+		if err != nil {
+			return err
 		}
-		var iss domain.Issue
-		if err := json.Unmarshal(body, &iss); err != nil {
-			return fmt.Errorf("create not JSON: %w", err)
+		aID, bID := idOf(a), idOf(other)
+
+		// A transcript fixture under the daemon's projects dir, for ingest.
+		sess := "cover000-0000-0000-0000-000000000001"
+		fixtureDir := filepath.Join(w.cfg.ProjectsDir, "-cover")
+		if err := os.MkdirAll(fixtureDir, 0o700); err != nil {
+			return err
 		}
-		// Each of these must respond with JSON too.
-		for _, op := range []struct{ method, path string }{
-			{http.MethodGet, "/issues"},
-			{http.MethodGet, "/issues/" + iss.ID},
-			{http.MethodGet, "/issues/" + iss.ID + "/history"},
-			{http.MethodGet, "/issues/" + iss.ID + "/documents"},
-			{http.MethodGet, "/search?q=over"},
-		} {
-			st, ct, b, err := req(op.method, op.path, "", w.cfg.Token)
-			if err != nil {
+		fixture := filepath.Join(fixtureDir, sess+".jsonl")
+		if err := os.WriteFile(fixture, []byte(`{"type":"user","message":{"role":"user","content":"hi"}}`+"\n"), 0o600); err != nil {
+			return err
+		}
+
+		docBody, err := mustJSON(http.MethodPost, "/issues/"+aID+"/documents", `{"kind":"problem","title":"t","content":"c"}`)
+		if err != nil {
+			return err
+		}
+		docID := idOf(docBody)
+		trBody, err := mustJSON(http.MethodPost, "/transcripts", `{"source_path":"`+fixture+`"}`)
+		if err != nil {
+			return err
+		}
+		trID := idOf(trBody)
+
+		// Every remaining registered route must answer with JSON.
+		steps := []struct{ method, path, body string }{
+			{http.MethodGet, "/issues", ""},
+			{http.MethodGet, "/issues/" + aID, ""},
+			{http.MethodPatch, "/issues/" + aID, `{"status":"in_progress"}`},
+			{http.MethodGet, "/issues/" + aID + "/history", ""},
+			{http.MethodPost, "/issues/" + aID + "/comments", `{"body":"c"}`},
+			{http.MethodGet, "/issues/" + aID + "/comments", ""},
+			{http.MethodGet, "/issues/" + aID + "/documents", ""},
+			{http.MethodGet, "/documents/" + docID, ""},
+			{http.MethodPatch, "/documents/" + docID, `{"content":"c2"}`},
+			{http.MethodPost, "/issues/" + aID + "/labels", `{"label":"urgent"}`},
+			{http.MethodDelete, "/issues/" + aID + "/labels?label=urgent", ""},
+			{http.MethodPut, "/issues/" + aID + "/parent", `{"parent_id":"` + bID + `"}`},
+			{http.MethodPost, "/issues/" + aID + "/relations", `{"related_issue_id":"` + bID + `"}`},
+			{http.MethodPost, "/issues/" + aID + "/blocks", `{"blocker_id":"` + bID + `"}`},
+			{http.MethodGet, "/transcripts", ""},
+			{http.MethodGet, "/transcripts/" + trID, ""},
+			{http.MethodPost, "/transcripts/" + trID + "/link", `{"issue_id":"` + aID + `"}`},
+			{http.MethodGet, "/issues/" + aID + "/transcripts", ""},
+			{http.MethodGet, "/search?q=cover", ""},
+			{http.MethodDelete, "/documents/" + docID, ""},
+			{http.MethodDelete, "/issues/" + bID, ""},
+		}
+		for _, s := range steps {
+			if _, err := mustJSON(s.method, s.path, s.body); err != nil {
 				return err
-			}
-			if st != http.StatusOK || !strings.HasPrefix(ct, "application/json") {
-				return fmt.Errorf("%s %s: status=%d ct=%q", op.method, op.path, st, ct)
-			}
-			if !json.Valid(b) {
-				return fmt.Errorf("%s %s: body not JSON", op.method, op.path)
 			}
 		}
 		return nil
 	})
 	sc.Step(`^it accepts and returns JSON with one endpoint per operation$`, func() error {
-		return nil // assertions performed in the When above
+		return nil // asserted in the When above
 	})
 
 	// --- CLI is a thin client ---
 	sc.Step(`^the daemon is running$`, func() error { return nil })
 	sc.Step(`^I run a CLI command$`, func() error {
-		cliJSON, cliReqs, w.err = runCLICounted("create", "--subject", "thin client", "--body", "b", "--json")
+		// Point the CLI at an instrumented server that returns a KNOWN response
+		// body and counts requests, so we can assert exactly one request and
+		// byte-for-byte passthrough.
+		const canned = `{"id":"canned-id","subject":"thin client","body":"b","type":"task","status":"open","priority":"p2","created_at":"2026-07-16T10:00:00Z","updated_at":"2026-07-16T10:00:00Z"}`
+		var count int64
+		srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			atomic.AddInt64(&count, 1)
+			rw.Header().Set("Content-Type", "application/json")
+			rw.WriteHeader(http.StatusCreated)
+			_, _ = rw.Write([]byte(canned))
+		}))
+		defer srv.Close()
+		saved := w.cfg.Host
+		w.cfg.Host = srv.URL
+		cliOut, w.err = w.runCLI("create", "--subject", "thin client", "--body", "b", "--json")
+		w.cfg.Host = saved
+		cliReqs = atomic.LoadInt64(&count)
+		// Stash the canned expectation for the Then via cliOut comparison.
+		if w.err == nil && strings.TrimSpace(cliOut) != canned {
+			w.err = fmt.Errorf("CLI did not print the response verbatim:\n got: %q\nwant: %q", strings.TrimSpace(cliOut), canned)
+		}
 		return w.err
 	})
 	sc.Step(`^it calls exactly one API endpoint and holds no behavior the API doesn't expose$`, func() error {
@@ -139,19 +205,13 @@ func registerSlice2Steps(sc *godog.ScenarioContext, w *world) {
 		if cliReqs != 1 {
 			return fmt.Errorf("CLI made %d requests, want exactly 1", cliReqs)
 		}
-		if !json.Valid([]byte(strings.TrimSpace(cliJSON))) {
-			return fmt.Errorf("CLI output is not the raw API JSON: %q", cliJSON)
-		}
 		return nil
 	})
 	sc.Step(`^the json flag$`, func() error { return nil })
 	sc.Step(`^it prints the API's raw JSON response$`, func() error {
-		var iss domain.Issue
-		if err := json.Unmarshal([]byte(strings.TrimSpace(cliJSON)), &iss); err != nil {
-			return fmt.Errorf("output not raw JSON: %w", err)
-		}
-		if iss.Subject != "thin client" {
-			return fmt.Errorf("subject = %q, want %q", iss.Subject, "thin client")
+		// Verbatim equality was asserted in the When; confirm it parses too.
+		if !json.Valid([]byte(strings.TrimSpace(cliOut))) {
+			return fmt.Errorf("output not valid JSON: %q", cliOut)
 		}
 		return nil
 	})
@@ -198,21 +258,44 @@ func registerSlice2Steps(sc *godog.ScenarioContext, w *world) {
 
 	// --- Use clients from another machine ---
 	sc.Step(`^SUTRA_HOST set to the daemon's LAN address and a valid token$`, func() error {
-		if w.cfg.Host == "" || w.cfg.Token == "" {
-			return fmt.Errorf("expected SUTRA_HOST and token to be set")
+		// Stand up a DISTINCT daemon (its own store) and point the client at it,
+		// proving the client honors the configured SUTRA_HOST rather than a
+		// hardcoded endpoint.
+		var err error
+		if remoteDir, err = os.MkdirTemp("", "sutra-remote-"); err != nil {
+			return err
 		}
+		if remoteSvc, err = service.New(config.Config{DBPath: filepath.Join(remoteDir, "t.db"), ProjectsDir: filepath.Join(remoteDir, "projects")}); err != nil {
+			return err
+		}
+		h := api.HandlerWithAuth(remoteSvc, w.cfg.Token)
+		remoteSrv = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			atomic.AddInt64(&remoteHits, 1)
+			h.ServeHTTP(rw, r)
+		}))
+		w.cfg.Host = remoteSrv.URL // the "remote" endpoint the client must honor
 		return nil
 	})
 	sc.Step(`^I run the CLI or TUI from another machine$`, func() error {
-		w.createIssue("from afar", "created over the network")
-		return w.err
+		out, err := w.runCLI("create", "--subject", "from afar", "--body", "b", "--json")
+		if err != nil {
+			w.err = err
+			return nil
+		}
+		remoteIssueID = idOf([]byte(strings.TrimSpace(out)))
+		return nil
 	})
 	sc.Step(`^it operates against the daemon's data$`, func() error {
 		if w.err != nil {
 			return w.err
 		}
-		if _, err := w.verify.GetIssue(w.issue.ID); err != nil {
-			return fmt.Errorf("issue not persisted in daemon store: %w", err)
+		if remoteHits == 0 {
+			return fmt.Errorf("the configured remote endpoint received no requests")
+		}
+		// The issue must live in the REMOTE daemon's store, proving the client
+		// targeted the configured host.
+		if _, err := remoteSvc.GetIssue(remoteIssueID); err != nil {
+			return fmt.Errorf("issue not in the remote daemon's store: %w", err)
 		}
 		return nil
 	})

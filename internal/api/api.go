@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/brent-hoover/sutra/internal/config"
@@ -83,10 +84,13 @@ func authMiddleware(token string, next http.Handler) http.Handler {
 	if token == "" {
 		return next
 	}
-	want := []byte("Bearer " + token)
+	want := []byte(token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got := []byte(r.Header.Get("Authorization"))
-		if subtle.ConstantTimeCompare(got, want) != 1 {
+		// Scheme is case-insensitive per RFC 7235; only the token is secret, so
+		// only it gets a constant-time compare.
+		scheme, tok, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+		if !ok || !strings.EqualFold(scheme, "Bearer") ||
+			subtle.ConstantTimeCompare([]byte(tok), want) != 1 {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
