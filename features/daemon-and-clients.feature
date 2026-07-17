@@ -1,5 +1,6 @@
 Feature: Daemon and clients
 
+  @slice1
   Scenario: Run the daemon
     Given a config with a listen address and DB path
     When I run sutra serve

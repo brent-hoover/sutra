@@ -1,5 +1,6 @@
 Feature: Issue tracking
 
+  @slice1
   Scenario: Create an issue
     Given no other input
     When I create an issue with a subject and body
