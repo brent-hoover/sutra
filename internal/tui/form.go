@@ -191,7 +191,7 @@ func (m *Model) editFields() map[string]string {
 // formView renders the active form.
 func (m *Model) formView() string {
 	var b strings.Builder
-	b.WriteString(styles.title.Render(m.form.title))
+	b.WriteString(styles.title.Render(truncate(m.form.title, m.width)))
 	b.WriteString("\n\n")
 	for i, f := range m.form.fields {
 		name := styles.fieldName.Render(f.label + ":")
@@ -207,7 +207,9 @@ func (m *Model) formView() string {
 		if f.value == "" && f.placeholder != "" && !(f.edited && f.label == "owner") {
 			shown = styles.dim.Render(cleanLine(f.placeholder))
 		}
-		b.WriteString(name + " " + shown + "\n")
+		// Truncate the composed (styled) field row to the terminal width so a
+		// long value can't wrap and push later fields / the help off-screen.
+		b.WriteString(truncate(name+" "+shown, m.width) + "\n")
 	}
 	b.WriteString(m.footer("tab next · enter submit · esc cancel"))
 	return b.String()
