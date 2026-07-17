@@ -1,31 +1,30 @@
 package store
 
-// White-box test: it reaches into the unexported db handle to install an atomic
-// cross-collection invariant that a *black-box* test cannot, so it can prove the
-// GetIssueView snapshot spans separate queries.
+// White-box test: it uses the unexported afterIssueReadHook seam and reaches
+// into a second handle's db to prove — deterministically — that GetIssueView
+// reads the issue row and its derived collections from one consistent snapshot.
 
 import (
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/brent-hoover/sutra/internal/domain"
 )
 
-// TestGetIssueViewSnapshotSpansQueries proves GetIssueView reads the issue row
-// and its derived collections from one consistent snapshot, not query-by-query.
+// TestGetIssueViewSnapshotIsolatesCommit proves the GetIssueView transaction
+// isolates the view from a write that commits mid-read.
 //
-// A writer on a second handle atomically flips two pieces of state that
-// GetIssueView reads with *different* queries: the issue row's owner and the
-// presence of a label. The invariant owner=="on" IFF the "toggle" label is
-// present holds in every committed DB state. A non-transactional view — reading
-// the issue row, then labels, in separate statements — could observe the row
-// from one commit and the labels from another and see the invariant violated;
-// the transactional snapshot cannot. Over many iterations against a concurrent
-// writer this deterministically fails if the surrounding transaction in
-// GetIssueView is removed, and passes with it in place.
-func TestGetIssueViewSnapshotSpansQueries(t *testing.T) {
+// The invariant owner=="on" IFF the "toggle" label is present holds in every
+// committed DB state (the writer flips both atomically). Using the
+// afterIssueReadHook seam, a writer on a second handle commits the on-state
+// after GetIssueView has read the issue row but before it reads the labels.
+// A transactional view reads both from the pre-commit snapshot (owner=off, no
+// label) — the invariant holds. A non-transactional view would read the row
+// pre-commit and the labels post-commit — owner=off but label present — and
+// violate it. The write is then confirmed to have landed, proving the commit
+// genuinely occurred between the two reads.
+func TestGetIssueViewSnapshotIsolatesCommit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "view.db")
 	reader, err := Open(path)
 	if err != nil {
@@ -51,85 +50,65 @@ func TestGetIssueViewSnapshotSpansQueries(t *testing.T) {
 	}
 	defer writer.Close()
 
-	// flip atomically sets owner and the label's presence together, so any
-	// committed state satisfies owner=="on" IFF the label is present.
-	flip := func(on bool) error {
+	// Atomically move to the on-state: owner="on" and the "toggle" label present.
+	flipOn := func() error {
 		tx, err := writer.db.Begin()
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
-		owner := "off"
-		if on {
-			owner = "on"
-		}
-		if _, err := tx.Exec(`UPDATE issues SET owner = ? WHERE id = ?`, owner, iss.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE issues SET owner = 'on' WHERE id = ?`, iss.ID); err != nil {
 			return err
 		}
-		if on {
-			if _, err := tx.Exec(`INSERT OR IGNORE INTO issue_label (issue_id, label) VALUES (?, 'toggle')`, iss.ID); err != nil {
-				return err
-			}
-		} else {
-			if _, err := tx.Exec(`DELETE FROM issue_label WHERE issue_id = ? AND label = 'toggle'`, iss.ID); err != nil {
-				return err
-			}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO issue_label (issue_id, label) VALUES (?, 'toggle')`, iss.ID); err != nil {
+			return err
 		}
 		return tx.Commit()
 	}
 
-	const iterations = 300
-	var wg sync.WaitGroup
-	wg.Add(2)
-	writeErr := make(chan error, 1)
-	var sawOn, sawOff bool
-
-	go func() { // writer: flip the coupled state on and off
-		defer wg.Done()
-		for i := 0; i < iterations; i++ {
-			if err := flip(true); err != nil {
-				writeErr <- err
-				return
-			}
-			if err := flip(false); err != nil {
-				writeErr <- err
-				return
-			}
+	// Commit the on-state exactly once, from the second handle, between the view's
+	// issue-row read and its label read.
+	fired := false
+	var hookErr error
+	afterIssueReadHook = func() {
+		if fired {
+			return
 		}
-	}()
-
-	go func() { // reader: the invariant must hold in every snapshot
-		defer wg.Done()
-		for i := 0; i < iterations*4; i++ {
-			view, err := reader.GetIssueView(iss.ID)
-			if err != nil {
-				t.Errorf("GetIssueView: %v", err)
-				return
-			}
-			on := view.Owner == "on"
-			has := containsLabel(view.Labels, "toggle")
-			if on != has {
-				t.Errorf("torn snapshot: owner=%q, labels=%v (owner and label must agree)", view.Owner, view.Labels)
-				return
-			}
-			if on {
-				sawOn = true
-			} else {
-				sawOff = true
-			}
-		}
-	}()
-
-	wg.Wait()
-	select {
-	case err := <-writeErr:
-		t.Fatalf("writer: %v", err)
-	default:
+		fired = true
+		hookErr = flipOn()
 	}
-	// Prove the goroutines actually overlapped and both committed states were
-	// observed, so the invariant check was meaningfully exercised.
-	if !sawOn || !sawOff {
-		t.Fatalf("reader did not observe both states (on=%v, off=%v); no real overlap", sawOn, sawOff)
+	t.Cleanup(func() { afterIssueReadHook = nil })
+
+	view, err := reader.GetIssueView(iss.ID)
+	afterIssueReadHook = nil
+	if err != nil {
+		t.Fatalf("GetIssueView: %v", err)
+	}
+	if hookErr != nil {
+		t.Fatalf("mid-read commit: %v", hookErr)
+	}
+	if !fired {
+		t.Fatal("hook did not fire; the mid-read commit was not exercised")
+	}
+
+	// The view must be internally consistent (a single snapshot).
+	on := view.Owner == "on"
+	has := containsLabel(view.Labels, "toggle")
+	if on != has {
+		t.Fatalf("torn snapshot: owner=%q, labels=%v (owner and label must agree)", view.Owner, view.Labels)
+	}
+	// It must reflect the pre-commit snapshot, not the write that landed mid-read.
+	if on {
+		t.Fatalf("view observed the mid-read commit; snapshot not isolated (owner=%q, labels=%v)", view.Owner, view.Labels)
+	}
+
+	// Confirm the write really did commit during the view read.
+	after, err := reader.GetIssueView(iss.ID)
+	if err != nil {
+		t.Fatalf("re-read: %v", err)
+	}
+	if after.Owner != "on" || !containsLabel(after.Labels, "toggle") {
+		t.Fatalf("mid-read commit did not persist: owner=%q, labels=%v", after.Owner, after.Labels)
 	}
 }
 

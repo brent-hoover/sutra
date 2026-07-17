@@ -214,6 +214,12 @@ func (s *Store) IsBlockingFor(issueID string) ([]string, error) {
 	return idsFor(s.db, isBlockingQuery, issueID)
 }
 
+// afterIssueReadHook, if non-nil, runs inside GetIssueView after the issue row
+// has been read but before its derived collections. It is a test-only seam
+// (always nil in production) that lets a test deterministically commit a write
+// between those reads to prove the surrounding transaction isolates the view.
+var afterIssueReadHook func()
+
 // GetIssueView reads an issue and its derived labels, related/blocking links,
 // and comments within a single transaction, so the projection is a consistent
 // snapshot even under concurrent mutations. Returns ErrNotFound if the issue
@@ -231,6 +237,9 @@ func (s *Store) GetIssueView(id string) (domain.IssueView, error) {
 	}
 	if err != nil {
 		return domain.IssueView{}, fmt.Errorf("get issue: %w", err)
+	}
+	if afterIssueReadHook != nil {
+		afterIssueReadHook()
 	}
 	view := domain.IssueView{Issue: issue}
 	if view.Issue.Labels, err = labelsFor(tx, id); err != nil {
