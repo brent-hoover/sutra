@@ -91,6 +91,32 @@ func TestEditFieldsOwnerClearAndUntouched(t *testing.T) {
 	}
 }
 
+func TestEditFromListReturnsToListAndRefreshesCache(t *testing.T) {
+	m := New(context.Background(), nil)
+	m.issues = []domain.Issue{{ID: "i1", Status: domain.StatusOpen}}
+	m.detail = &issueDetail{issue: domain.Issue{ID: "i1"}} // stale, from a prior view
+	m.openEditForm(m.issues[0])                            // opened from the list
+
+	m.Update(issueUpdatedMsg{gen: m.gen, issue: domain.Issue{ID: "i1", Status: domain.StatusClosed}})
+
+	if m.mode != listMode {
+		t.Fatalf("edit opened from the list returned to %v, want list", m.mode)
+	}
+	if m.issues[0].Status != domain.StatusClosed {
+		t.Fatalf("list cache not refreshed after edit: %q", m.issues[0].Status)
+	}
+}
+
+func TestCannotLeaveFormWhileSubmitting(t *testing.T) {
+	m := New(context.Background(), nil)
+	m.openCreateForm()
+	m.submitting = true
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != formMode {
+		t.Fatalf("escape left a submitting form: mode = %v", m.mode)
+	}
+}
+
 func TestStaleResponsesIgnored(t *testing.T) {
 	// A detail response from before the user opened a form must not clobber it.
 	m := New(context.Background(), nil)

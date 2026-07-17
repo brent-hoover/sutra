@@ -11,7 +11,8 @@ import (
 func (m *Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
-		m.bumpGen() // invalidate any in-flight load
+		m.bumpGen()    // invalidate any in-flight load
+		m.detail = nil // discard so a later action can't follow a stale detail
 		m.mode = listMode
 		return m, nil
 	case "a":

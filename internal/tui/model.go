@@ -122,7 +122,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		if msg.err == nil {
 			m.statusMsg = "updated " + msg.issue.ID
-			if m.detail != nil && m.detail.issue.ID == msg.issue.ID {
+			m.replaceIssue(msg.issue) // keep the list cache current
+			// Return to where the edit was opened from. Editing from the detail
+			// view refreshes the detail; editing from the list refreshes the list.
+			if m.form.origin == detailMode && m.detail != nil && m.detail.issue.ID == msg.issue.ID {
 				m.mode = detailMode
 				return m, m.loadDetailCmd(msg.issue.ID, m.gen)
 			}
@@ -197,6 +200,17 @@ func (m *Model) View() string {
 		return m.formView()
 	default:
 		return m.listView()
+	}
+}
+
+// replaceIssue updates the cached list entry for issue in place, so the list
+// reflects an edit immediately without waiting for a reload.
+func (m *Model) replaceIssue(issue domain.Issue) {
+	for i := range m.issues {
+		if m.issues[i].ID == issue.ID {
+			m.issues[i] = issue
+			return
+		}
 	}
 }
 

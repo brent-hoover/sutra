@@ -34,8 +34,9 @@ type form struct {
 	title    string
 	fields   []field
 	active   int
-	targetID string // issue being edited or commented on
-	parentID string // parent for a child issue
+	targetID string   // issue being edited or commented on
+	parentID string   // parent for a child issue
+	origin   viewMode // screen to return to on cancel/success
 }
 
 func (m *Model) openCreateForm() {
@@ -43,6 +44,7 @@ func (m *Model) openCreateForm() {
 		purpose: createForm,
 		title:   "New issue",
 		fields:  []field{{label: "subject"}, {label: "body"}},
+		origin:  m.mode,
 	}
 	m.bumpGen() // invalidate any in-flight load
 	m.mode = formMode
@@ -54,6 +56,7 @@ func (m *Model) openChildForm(parent domain.Issue) {
 		title:    "New child of " + parent.ID,
 		fields:   []field{{label: "subject"}, {label: "body"}},
 		parentID: parent.ID,
+		origin:   m.mode,
 	}
 	m.bumpGen() // invalidate any in-flight load
 	m.mode = formMode
@@ -70,6 +73,7 @@ func (m *Model) openEditForm(issue domain.Issue) {
 			{label: "priority", placeholder: string(issue.Priority)},
 			{label: "owner", placeholder: issue.Owner},
 		},
+		origin: m.mode,
 	}
 	m.bumpGen() // invalidate any in-flight load
 	m.mode = formMode
@@ -81,6 +85,7 @@ func (m *Model) openCommentForm(issueID string) {
 		title:    "Comment on " + issueID,
 		targetID: issueID,
 		fields:   []field{{label: "body"}, {label: "author"}},
+		origin:   m.mode,
 	}
 	m.bumpGen() // invalidate any in-flight load
 	m.mode = formMode
@@ -90,9 +95,12 @@ func (m *Model) openCommentForm(issueID string) {
 func (m *Model) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		// Abandon the form: drop any in-flight submit and clear the guard so a
-		// late response cannot land on the screen we return to.
-		m.submitting = false
+		if m.submitting {
+			// A submit is in flight: the HTTP request cannot be un-sent, so we
+			// must not let the user "cancel" and risk a duplicate on retry.
+			// Stay until the response arrives (or the client times out).
+			return m, nil
+		}
 		m.bumpGen()
 		m.mode = m.formReturnMode()
 		return m, nil
@@ -129,7 +137,7 @@ func (m *Model) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) formReturnMode() viewMode {
-	if m.form.purpose == commentForm && m.detail != nil {
+	if m.form.origin == detailMode && m.detail != nil {
 		return detailMode
 	}
 	return listMode
