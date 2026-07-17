@@ -1,15 +1,17 @@
 package main_test
 
 // Step definitions for implemented scenarios (tagged @slice1). Each scenario
-// runs against the full vertical: client → httptest(api) → service → store,
-// backed by a throwaway SQLite file.
+// runs against the real serve path: a live api.Run daemon on a loopback
+// listener, exercised through the HTTP client, backed by a throwaway SQLite
+// file. A second service handle on the same file verifies ledger writes.
 
 import (
 	"context"
 	"fmt"
-	"net/http/httptest"
+	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/cucumber/godog"
 
@@ -22,13 +24,24 @@ import (
 
 type world struct {
 	dir     string
-	svc     *service.Service
-	server  *httptest.Server
+	verify  *service.Service // second handle for reading ledger state
+	serveCh chan error       // receives api.Run's exit error
 	client  *client.Client
 	subject string
 	body    string
 	issue   domain.Issue
+	viewed  domain.Issue
 	err     error
+}
+
+// freeLoopbackAddr returns an unused 127.0.0.1:port for the daemon to bind.
+func freeLoopbackAddr() (string, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	defer l.Close()
+	return l.Addr().String(), nil
 }
 
 func (w *world) setup() error {
@@ -37,25 +50,55 @@ func (w *world) setup() error {
 		return err
 	}
 	w.dir = dir
-	cfg := config.Config{DBPath: filepath.Join(dir, "test.db")}
-	if w.svc, err = service.New(cfg); err != nil {
+	dbPath := filepath.Join(dir, "test.db")
+
+	addr, err := freeLoopbackAddr()
+	if err != nil {
 		return err
 	}
-	w.server = httptest.NewServer(api.Handler(w.svc))
-	w.client = client.New(config.Config{Host: w.server.URL})
+	cfg := config.Config{ListenAddr: addr, DBPath: dbPath, Host: "http://" + addr}
+
+	// Start the real daemon (config + api.Run + store open + listen).
+	w.serveCh = make(chan error, 1)
+	go func() { w.serveCh <- api.Run(cfg) }()
+	if err := w.waitListening(addr); err != nil {
+		return err
+	}
+
+	w.client = client.New(cfg)
+	if w.verify, err = service.New(config.Config{DBPath: dbPath}); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (w *world) teardown() {
-	if w.server != nil {
-		w.server.Close()
+func (w *world) waitListening(addr string) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-w.serveCh:
+			return fmt.Errorf("daemon exited before listening: %w", err)
+		default:
+		}
+		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	if w.svc != nil {
-		w.svc.Close()
+	return fmt.Errorf("daemon did not start listening on %s", addr)
+}
+
+func (w *world) teardown() {
+	if w.verify != nil {
+		w.verify.Close()
 	}
 	if w.dir != "" {
 		os.RemoveAll(w.dir)
 	}
+	// The api.Run goroutine has no shutdown handle; it is left idle and reaped
+	// when the test binary exits. Each scenario binds a fresh port.
 }
 
 // InitializeScenario wires a fresh world per scenario and registers steps.
@@ -98,7 +141,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^it is stored$`, func() error { return nil })
 	sc.Step(`^a LedgerEntry of kind created is appended$`, func() error {
-		history, err := w.svc.IssueHistory(w.issue.ID)
+		history, err := w.verify.IssueHistory(w.issue.ID)
 		if err != nil {
 			return err
 		}
@@ -120,6 +163,28 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^it is rejected$`, func() error {
 		if w.err == nil {
 			return fmt.Errorf("expected creation to be rejected, got none")
+		}
+		return nil
+	})
+
+	// View an issue's core fields
+	sc.Step(`^a stored issue exists$`, func(ctx context.Context) error {
+		w.issue, w.err = w.client.CreateIssue(ctx, "View me", "the body to read back")
+		return w.err
+	})
+	sc.Step(`^I view it by id$`, func(ctx context.Context) error {
+		w.viewed, w.err = w.client.GetIssue(ctx, w.issue.ID)
+		return nil
+	})
+	sc.Step(`^its core fields are returned$`, func() error {
+		if w.err != nil {
+			return fmt.Errorf("view failed: %w", w.err)
+		}
+		if w.viewed.ID != w.issue.ID || w.viewed.Subject != w.issue.Subject || w.viewed.Body != w.issue.Body {
+			return fmt.Errorf("viewed issue does not match created issue")
+		}
+		if w.viewed.Type != w.issue.Type || w.viewed.Status != w.issue.Status || w.viewed.Priority != w.issue.Priority {
+			return fmt.Errorf("viewed issue metadata does not match")
 		}
 		return nil
 	})

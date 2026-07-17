@@ -22,7 +22,10 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("create db dir: %w", err)
 		}
 	}
-	db, err := sql.Open("sqlite", path)
+	// WAL lets the daemon's clients read concurrently with a writer, and
+	// busy_timeout makes a second connection wait rather than fail on a lock.
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}

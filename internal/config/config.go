@@ -16,11 +16,15 @@ type Config struct {
 }
 
 // Load builds a Config from environment variables, falling back to defaults.
+//
+// The daemon binds to loopback by default: slice 1 is localhost-only, and
+// exposing it on the LAN must be an explicit choice (via SUTRA_LISTEN) once
+// authentication lands in slice 2.
 func Load() Config {
 	return Config{
-		ListenAddr: envOr("SUTRA_LISTEN", ":8422"),
+		ListenAddr: envOr("SUTRA_LISTEN", "127.0.0.1:8422"),
 		DBPath:     envOr("SUTRA_DB", defaultDBPath()),
-		Host:       envOr("SUTRA_HOST", "http://localhost:8422"),
+		Host:       envOr("SUTRA_HOST", "http://127.0.0.1:8422"),
 		Token:      os.Getenv("SUTRA_TOKEN"),
 	}
 }

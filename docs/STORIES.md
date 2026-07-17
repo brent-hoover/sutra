@@ -31,6 +31,14 @@ As a developer, I want to list issues so that I can see open work.
 
 **Priority:** must
 
+### Story: View an issue's core fields
+As a developer, I want to view a single issue's core fields by id so that I can read it back immediately.
+
+**Acceptance criteria:**
+- Given a stored issue, When I view it by `id`, Then its core fields (`subject`, `body`, `type`, `status`, `priority`) are returned
+
+**Priority:** must
+
 ### Story: View an issue
 As a developer, I want to view a single issue with its comments and links so that I have full context.
 
@@ -71,6 +79,8 @@ As a developer, I want to link issues by hierarchy, relation, and blocking so th
 **Acceptance criteria:**
 - Given two issues, When I set one as another's `parent_id`, Then the child/parent relation holds
 - Given an issue, When I set its `parent_id` to itself, Then it is rejected
+- Given issues A and B where B's parent is A, When I set A's `parent_id` to B, Then it is rejected as a cycle
+- Given issues A, B, and C forming a parent chain A→B→C, When I set A's `parent_id` to C, Then it is rejected as a cycle
 - Given two issues, When I mark A as blocked by B, Then A shows B in `blocked_by` and B shows A in `is_blocking` (derived from `issue_block`)
 - Given two issues, When I relate them, Then each appears in the other's related list
 

@@ -20,6 +20,12 @@ Feature: Issue tracking
     When I list issues
     Then the soft-deleted one is excluded by default
 
+  @slice1
+  Scenario: View an issue's core fields
+    Given a stored issue exists
+    When I view it by id
+    Then its core fields are returned
+
   Scenario: View an issue
     Given an issue with comments, labels, and links
     When I view it by id
@@ -53,6 +59,12 @@ Feature: Issue tracking
     Given an issue
     When I set its parent_id to itself
     Then it is rejected
+    Given issues A and B where B's parent is A
+    When I set A's parent_id to B
+    Then it is rejected as a cycle
+    Given issues A, B, and C forming a parent chain A to B to C
+    When I set A's parent_id to C
+    Then it is rejected as a cycle
     Given two issues
     When I mark A as blocked by B
     Then A shows B in blocked_by and B shows A in is_blocking, derived from issue_block

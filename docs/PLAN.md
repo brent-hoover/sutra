@@ -19,6 +19,24 @@ end-to-end sanity check — holds. STORIES.md acceptance criteria are the
 source of truth for the scenarios; the Verify lines below are the manual
 confirmation on top.
 
+**Cross-cutting stories.** A few stories span multiple slices and are not
+completed by one:
+
+- *View an issue* (full, with comments/labels/links) needs entities from S3
+  (comments) and S4 (labels/links). Its slice-1 increment is the separate
+  *View an issue's core fields* story; the full story completes in S4.
+- *JSON API covers every operation* and *CLI is a thin client* are evergreen
+  invariants, not one-time completions: each slice that adds an operation
+  must add its JSON endpoint and thin CLI command, re-checked per slice for
+  the operations present at that point.
+- *Manage issues in the TUI* (S8) grows as the operations it drives land in
+  earlier slices; its scenario is verified against the capabilities present
+  when S8 is built.
+
+Scenarios are tagged by slice (`@slice1`, …). The default test run
+(`TestImplemented`) executes only implemented tags and stays green; the full
+red backlog is opt-in (`SUTRA_BACKLOG=1`, `TestBacklog`).
+
 ## Dependency graph
 
 ```
@@ -50,7 +68,7 @@ To let multiple agents work concurrently after S2 without colliding:
   verified independently before merge.
 
 ## Slice 1: Walking skeleton
-- **Stories:** Run the daemon · Create an issue · View an issue
+- **Stories:** Run the daemon · Create an issue · View an issue's core fields
 - **Why now:** stands up the full `cli → client → HTTP → api → service →
   store → SQLite` spine with all 8 modules touched minimally, and sets the
   JSON-endpoint + thin-CLI pattern every later slice follows. Localhost, no
@@ -73,14 +91,18 @@ To let multiple agents work concurrently after S2 without colliding:
 - **Why now:** completes the core issue loop and the change ledger on the
   skeleton. Head of the issues track.
 - **Verify:** create several issues, update/comment/delete them,
-  `sutra list --status open --label bug` returns the expected set, and issue
-  history shows the `LedgerEntry` rows.
+  `sutra list --status open --type bug` returns the expected set (filters use
+  only S3-supported fields; label filtering arrives with labels in S4), and
+  issue history shows the `LedgerEntry` rows.
 
 ## Slice 4: Issue linking & labels
-- **Stories:** Link issues · Label an issue
+- **Stories:** Link issues · Label an issue · View an issue
 - **Why now:** richer issue structure once core CRUD exists (follows S3).
+  The full *View an issue* story completes here — it is the first slice where
+  comments (S3), labels, and links all exist.
 - **Verify:** set parent/related/blocking links and labels via CLI; the
-  issue view shows them.
+  issue view shows them; a full `sutra view <id>` shows comments, labels, and
+  links.
 
 ## Slice 5: Documents
 - **Stories:** Attach a document to an issue · Read a document · List an
