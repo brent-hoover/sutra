@@ -19,6 +19,10 @@ const contextWindow = 2
 // result set. A caller may request fewer via SearchQuery.Limit, never more.
 const maxResults = 100
 
+// searchIndexedKey marks in schema_meta that the one-time index backfill has
+// completed, so it is not re-scanned on every open.
+const searchIndexedKey = "search_indexed"
+
 // querier is satisfied by both *sql.DB and *sql.Tx, so hydration helpers can
 // run against a shared read transaction for a consistent snapshot.
 type querier interface {
@@ -39,6 +43,10 @@ type querier interface {
 // long after its text was indexed). See Search for the exclusion rule.
 func (s *Store) migrateSearch() error {
 	const schema = `
+CREATE TABLE IF NOT EXISTS schema_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
     kind UNINDEXED,
     ref_id UNINDEXED,
@@ -84,19 +92,30 @@ END;`
 	return s.reconcileSearch()
 }
 
-// reconcileSearch indexes any source row not already present in the FTS index —
-// content written before the triggers existed (an older DB), or rows missed if a
-// prior migration was interrupted. It runs on every open, in one transaction,
-// and is idempotent: the per-row NOT EXISTS guard means already-indexed rows
-// (by triggers or a prior reconcile) are never duplicated. This reconciles index
-// completeness rather than gating on emptiness, so a trigger-maintained write
-// after an interrupted migration can never leave historical rows unindexed.
+// reconcileSearch performs the one-time backfill of rows written before the
+// triggers existed (an older DB) or missed by an interrupted migration, then
+// records a marker so it never runs again — from then on the triggers keep the
+// index current, so there is no per-open scan cost.
+//
+// The whole thing runs in one transaction and is guarded by the marker, so it
+// executes at most once. The per-row NOT EXISTS guard keeps it idempotent and
+// duplicate-free even in the pathological case where a prior interrupted
+// migration left the index partially populated (via triggers) before the marker
+// was set.
 func (s *Store) reconcileSearch() error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	var done int
+	if err := tx.QueryRow(`SELECT count(*) FROM schema_meta WHERE key = ?`, searchIndexedKey).Scan(&done); err != nil {
+		return fmt.Errorf("check search marker: %w", err)
+	}
+	if done > 0 {
+		return nil // already backfilled; triggers maintain the index from here
+	}
 
 	for _, stmt := range []string{
 		`INSERT INTO search_fts(kind, ref_id, text)
@@ -112,6 +131,12 @@ func (s *Store) reconcileSearch() error {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("reconcile search index: %w", err)
 		}
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO schema_meta (key, value) VALUES (?, ?)`,
+		searchIndexedKey, time.Now().UTC().Format(timeFmt),
+	); err != nil {
+		return fmt.Errorf("set search marker: %w", err)
 	}
 	return tx.Commit()
 }
