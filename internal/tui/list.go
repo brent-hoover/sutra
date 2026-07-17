@@ -66,11 +66,14 @@ func (m *Model) listView() string {
 		if is.ParentID != nil {
 			line += " (child of " + cleanLine(*is.ParentID) + ")"
 		}
-		if avail := m.width - 2; m.width > 0 {
-			if avail < 1 {
-				avail = 1
+		if m.width > 0 {
+			// The 2-cell cursor is always rendered; when it consumes all the
+			// width, the issue text collapses to empty rather than forcing a wrap.
+			if avail := m.width - 2; avail <= 0 {
+				line = ""
+			} else {
+				line = truncate(line, avail)
 			}
-			line = truncate(line, avail)
 		}
 		cursor := "  "
 		if i == m.cursor {
