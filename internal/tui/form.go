@@ -199,10 +199,12 @@ func (m *Model) formView() string {
 			name = styles.active.Render("> " + f.label + ":")
 		}
 		shown := cleanLine(f.value)
-		// Show the placeholder (current value) only while the field is
-		// untouched; once edited, render exactly what will be submitted — even
-		// an intentionally emptied field — so the display never contradicts it.
-		if f.value == "" && !f.edited && f.placeholder != "" {
+		// Show the placeholder (current value) when the field is empty and its
+		// current value will be preserved on submit. Only `owner` submits an
+		// empty value (clearing it); enum fields omit an empty value (keeping
+		// the current one), so their placeholder stays visible even when edited
+		// — the display then never contradicts what submission does.
+		if f.value == "" && f.placeholder != "" && !(f.edited && f.label == "owner") {
 			shown = styles.dim.Render(cleanLine(f.placeholder))
 		}
 		b.WriteString(name + " " + shown + "\n")

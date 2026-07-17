@@ -58,11 +58,15 @@ func (m *Model) listView() string {
 	}
 	for i := start; i < end; i++ {
 		is := m.issues[i]
-		cursor := "  "
+		// Build the plain line, truncate it to the terminal width (minus the
+		// 2-col cursor) so a long subject can't wrap onto a second row and push
+		// the selection off-screen, THEN apply styling.
 		line := fmt.Sprintf("%s\t[%s/%s/%s]\t%s", cleanLine(is.ID), is.Type, is.Status, is.Priority, cleanLine(is.Subject))
 		if is.ParentID != nil {
-			line += styles.dim.Render(" (child of " + cleanLine(*is.ParentID) + ")")
+			line += " (child of " + cleanLine(*is.ParentID) + ")"
 		}
+		line = truncate(line, m.width-2)
+		cursor := "  "
 		if i == m.cursor {
 			cursor = styles.cursor.Render("> ")
 			line = styles.selected.Render(line)
@@ -114,10 +118,10 @@ func (m *Model) footer(help string) string {
 	var b strings.Builder
 	b.WriteByte('\n')
 	if m.err != nil {
-		b.WriteString(styles.errMsg.Render("error: "+cleanLine(m.err.Error())) + "\n")
+		b.WriteString(styles.errMsg.Render(truncate("error: "+cleanLine(m.err.Error()), m.width)) + "\n")
 	} else if m.statusMsg != "" {
-		b.WriteString(styles.status.Render(cleanLine(m.statusMsg)) + "\n")
+		b.WriteString(styles.status.Render(truncate(cleanLine(m.statusMsg), m.width)) + "\n")
 	}
-	b.WriteString(styles.help.Render(help))
+	b.WriteString(styles.help.Render(truncate(help, m.width)))
 	return b.String()
 }

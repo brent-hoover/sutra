@@ -85,6 +85,6 @@ func outputLink(cmd *cobra.Command, res client.IssueResult) error {
 		return err
 	}
 	i := res.Issue
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t[%s/%s/%s]\t%s\n", i.ID, i.Type, i.Status, i.Priority, i.Subject)
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t[%s/%s/%s]\t%s\n", i.ID, i.Type, i.Status, i.Priority, cleanLine(i.Subject))
 	return err
 }

@@ -31,3 +31,21 @@ func clean(s string) string {
 func cleanLine(s string) string {
 	return strings.NewReplacer("\n", " ", "\t", " ", "\r", " ").Replace(clean(s))
 }
+
+// truncate shortens a plain (unstyled) string to at most w runes, appending an
+// ellipsis when it overflows. A non-positive w leaves the string unchanged
+// (width not yet known). It must be applied before styling — truncating a
+// string that already contains ANSI escapes would corrupt them.
+func truncate(s string, w int) string {
+	if w <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= w {
+		return s
+	}
+	if w == 1 {
+		return "…"
+	}
+	return string(r[:w-1]) + "…"
+}

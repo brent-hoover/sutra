@@ -49,10 +49,10 @@ func renderSearch(cmd *cobra.Command, results domain.SearchResults) error {
 	for _, h := range results.Hits {
 		switch h.Kind {
 		case domain.KindIssue:
-			fmt.Fprintf(&b, "[issue]    %s\t%s\n", h.Issue.ID, clean(h.Issue.Subject))
+			fmt.Fprintf(&b, "[issue]    %s\t%s\n", h.Issue.ID, cleanLine(h.Issue.Subject))
 		case domain.KindDocument:
 			fmt.Fprintf(&b, "[document] %s\t[%s]\t%s (issue %s)\n",
-				h.Document.ID, clean(string(h.Document.Kind)), clean(h.Document.Title), h.Document.IssueID)
+				h.Document.ID, cleanLine(string(h.Document.Kind)), cleanLine(h.Document.Title), h.Document.IssueID)
 		case domain.KindMessage:
 			renderMessageHit(&b, h)
 		}
