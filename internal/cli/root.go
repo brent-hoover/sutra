@@ -24,6 +24,7 @@ func NewRoot(cfg config.Config) *cobra.Command {
 		serveCmd(cfg),
 		createCmd(cfg),
 		viewCmd(cfg),
+		docCmd(cfg),
 	)
 	return root
 }

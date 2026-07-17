@@ -15,7 +15,7 @@ import (
 	"github.com/cucumber/godog"
 )
 
-const implementedTags = "@slice1"
+const implementedTags = "@slice1,@slice5"
 
 func TestImplemented(t *testing.T) {
 	suite := godog.TestSuite{

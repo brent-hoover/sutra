@@ -96,7 +96,17 @@ CREATE TABLE IF NOT EXISTS ledger (
     field     TEXT NOT NULL DEFAULT '',
     old_value TEXT NOT NULL DEFAULT '',
     new_value TEXT NOT NULL DEFAULT ''
-);`
+);
+CREATE TABLE IF NOT EXISTS documents (
+    id         TEXT PRIMARY KEY,
+    issue_id   TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    title      TEXT NOT NULL DEFAULT '',
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_documents_issue_id ON documents (issue_id);`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}

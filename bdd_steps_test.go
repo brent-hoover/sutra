@@ -39,6 +39,12 @@ type world struct {
 	viewOut   string
 	err       error
 	envBackup map[string]*string // original env values to restore in teardown
+
+	// Document scenario state (slice 5).
+	doc        domain.Document
+	docContent string
+	docOut     string
+	attached   []domain.Document // documents attached in the current scenario
 }
 
 var managedEnvKeys = []string{"SUTRA_LISTEN", "SUTRA_DB", "SUTRA_HOST", "SUTRA_TOKEN"}
@@ -203,6 +209,19 @@ func (w *world) createIssue(subject, body string) {
 	}
 }
 
+// attachDoc attaches a document via the real CLI, parsing the --json response
+// into w.doc and recording it in w.attached.
+func (w *world) attachDoc(issueID, kind, title, content string) {
+	var out string
+	out, w.err = w.runCLI("doc", "attach", issueID, "--kind", kind, "--title", title, "--content", content, "--json")
+	if w.err == nil {
+		w.err = json.Unmarshal([]byte(strings.TrimSpace(out)), &w.doc)
+		if w.err == nil {
+			w.attached = append(w.attached, w.doc)
+		}
+	}
+}
+
 // InitializeScenario wires a fresh world per scenario and registers steps.
 func InitializeScenario(sc *godog.ScenarioContext) {
 	w := &world{}
@@ -317,6 +336,162 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		}
 		if _, err := w.runCLI("view", w.issue.ID, "--json"); err != nil {
 			return fmt.Errorf("daemon did not read back through the store: %w", err)
+		}
+		return nil
+	})
+
+	// --- Documents (slice 5) ---
+
+	// Attach a document to an issue
+	sc.Step(`^any issue$`, func() error {
+		w.createIssue("Doc host", "an issue to hang documents from")
+		return w.err
+	})
+	sc.Step(`^I attach a Document with a kind of problem, design, plan, or scenarios and markdown content$`, func() error {
+		w.attachDoc(w.issue.ID, string(domain.DocProblem), "Problem statement", "# Problem\n\nSomething needs fixing.")
+		return nil
+	})
+	sc.Step(`^it is stored linked to that issue with timestamps set$`, func() error {
+		if w.err != nil {
+			return fmt.Errorf("attach failed: %w", w.err)
+		}
+		if w.doc.ID == "" {
+			return fmt.Errorf("expected a generated document id")
+		}
+		if w.doc.IssueID != w.issue.ID {
+			return fmt.Errorf("document linked to %q, want issue %q", w.doc.IssueID, w.issue.ID)
+		}
+		if w.doc.CreatedAt.IsZero() || w.doc.UpdatedAt.IsZero() {
+			return fmt.Errorf("expected timestamps to be set")
+		}
+		stored, err := w.verify.GetDocument(w.doc.ID)
+		if err != nil {
+			return fmt.Errorf("document not persisted: %w", err)
+		}
+		if stored.Content == "" {
+			return fmt.Errorf("stored document has empty content")
+		}
+		return nil
+	})
+	sc.Step(`^empty content$`, func() error {
+		w.docContent = ""
+		return nil
+	})
+	sc.Step(`^I try to attach$`, func() error {
+		w.attachDoc(w.issue.ID, string(domain.DocProblem), "Empty", w.docContent)
+		return nil
+	})
+
+	// Read a document
+	sc.Step(`^an issue with a document$`, func() error {
+		w.createIssue("Doc host", "an issue with one document")
+		if w.err != nil {
+			return w.err
+		}
+		w.attachDoc(w.issue.ID, string(domain.DocDesign), "Design doc", "# Design\n\nThe approach.")
+		return w.err
+	})
+	sc.Step(`^I open the document by id$`, func() error {
+		// Default render (no --json) so a renderer that drops fields is caught.
+		w.docOut, w.err = w.runCLI("doc", "read", w.doc.ID)
+		return nil
+	})
+	sc.Step(`^its kind, title, and content are returned$`, func() error {
+		if w.err != nil {
+			return fmt.Errorf("read failed: %w", w.err)
+		}
+		for label, want := range map[string]string{
+			"kind":    string(w.doc.Kind),
+			"title":   w.doc.Title,
+			"content": w.doc.Content,
+		} {
+			if !strings.Contains(w.docOut, want) {
+				return fmt.Errorf("read output missing %s (%q):\n%s", label, want, w.docOut)
+			}
+		}
+		return nil
+	})
+
+	// List an issue's documents
+	sc.Step(`^an issue with several documents$`, func() error {
+		w.createIssue("Doc host", "an issue with several documents")
+		if w.err != nil {
+			return w.err
+		}
+		w.attachDoc(w.issue.ID, string(domain.DocProblem), "The problem", "problem body")
+		if w.err != nil {
+			return w.err
+		}
+		w.attachDoc(w.issue.ID, string(domain.DocDesign), "The design", "design body")
+		if w.err != nil {
+			return w.err
+		}
+		w.attachDoc(w.issue.ID, string(domain.DocPlan), "The plan", "plan body")
+		return w.err
+	})
+	sc.Step(`^I list its documents$`, func() error {
+		w.docOut, w.err = w.runCLI("doc", "list", w.issue.ID)
+		return nil
+	})
+	sc.Step(`^all appear with their kind and title$`, func() error {
+		if w.err != nil {
+			return fmt.Errorf("list failed: %w", w.err)
+		}
+		for _, d := range w.attached {
+			if !strings.Contains(w.docOut, string(d.Kind)) {
+				return fmt.Errorf("list output missing kind %q:\n%s", d.Kind, w.docOut)
+			}
+			if !strings.Contains(w.docOut, d.Title) {
+				return fmt.Errorf("list output missing title %q:\n%s", d.Title, w.docOut)
+			}
+		}
+		return nil
+	})
+
+	// Update a document
+	sc.Step(`^an existing document$`, func() error {
+		w.createIssue("Doc host", "an issue with a document to update")
+		if w.err != nil {
+			return w.err
+		}
+		w.attachDoc(w.issue.ID, string(domain.DocPlan), "Plan doc", "original content")
+		return w.err
+	})
+	sc.Step(`^I update its content$`, func() error {
+		_, w.err = w.runCLI("doc", "update", w.doc.ID, "--content", "revised content", "--json")
+		return nil
+	})
+	sc.Step(`^the new content is stored and updated_at advances$`, func() error {
+		if w.err != nil {
+			return fmt.Errorf("update failed: %w", w.err)
+		}
+		stored, err := w.verify.GetDocument(w.doc.ID)
+		if err != nil {
+			return err
+		}
+		if stored.Content != "revised content" {
+			return fmt.Errorf("content = %q, want %q", stored.Content, "revised content")
+		}
+		if !stored.UpdatedAt.After(w.doc.UpdatedAt) {
+			return fmt.Errorf("updated_at did not advance: was %s, now %s", w.doc.UpdatedAt, stored.UpdatedAt)
+		}
+		return nil
+	})
+
+	// Remove a document
+	sc.Step(`^I remove it$`, func() error {
+		_, w.err = w.runCLI("doc", "remove", w.doc.ID)
+		return w.err
+	})
+	sc.Step(`^it no longer appears in the issue's document list$`, func() error {
+		docs, err := w.verify.ListDocuments(w.issue.ID)
+		if err != nil {
+			return err
+		}
+		for _, d := range docs {
+			if d.ID == w.doc.ID {
+				return fmt.Errorf("removed document %s still appears in the list", w.doc.ID)
+			}
 		}
 		return nil
 	})
