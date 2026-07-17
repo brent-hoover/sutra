@@ -46,12 +46,16 @@ func TestReconcileSearch(t *testing.T) {
 		t.Fatalf("upsert transcript: %v", err)
 	}
 
-	// Simulate an inconsistent index left by an interrupted first migration
-	// (marker never set): a missing row (drop the message), a stale/orphaned row
-	// (an FTS entry for an issue id that does not exist), and a duplicate row
-	// (a second FTS entry for the real issue).
+	// Simulate a DB upgraded from the prior (v1) additive-backfill version whose
+	// index it may have left inconsistent: the OLD marker is present, the current
+	// versioned marker is absent, and the index has a missing row (drop the
+	// message), a stale/orphaned row (an FTS entry for a nonexistent issue id),
+	// and a duplicate row (a second FTS entry for the real issue).
 	if _, err := s.db.Exec(`DELETE FROM schema_meta WHERE key = ?`, searchIndexedKey); err != nil {
-		t.Fatalf("clear marker: %v", err)
+		t.Fatalf("clear current marker: %v", err)
+	}
+	if _, err := s.db.Exec(`INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('search_indexed', 'v1')`); err != nil {
+		t.Fatalf("set old marker: %v", err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM search_fts WHERE kind = 'message'`); err != nil {
 		t.Fatalf("drop message row: %v", err)

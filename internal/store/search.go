@@ -19,9 +19,12 @@ const contextWindow = 2
 // result set. A caller may request fewer via SearchQuery.Limit, never more.
 const maxResults = 100
 
-// searchIndexedKey marks in schema_meta that the one-time index backfill has
-// completed, so it is not re-scanned on every open.
-const searchIndexedKey = "search_indexed"
+// searchIndexedKey marks in schema_meta that the current index-rebuild version
+// has completed, so it is not re-scanned on every open. It is versioned: bumping
+// it forces the one-time atomic rebuild to run once more on an existing DB whose
+// index a prior version may have left inconsistent (v1 was an additive,
+// non-repairing backfill), then never again.
+const searchIndexedKey = "search_index_v2"
 
 // querier is satisfied by both *sql.DB and *sql.Tx, so hydration helpers can
 // run against a shared read transaction for a consistent snapshot.
