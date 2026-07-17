@@ -137,14 +137,22 @@ func scanIssue(sc rowScanner) (domain.Issue, error) {
 // GetIssue returns the issue with the given id (with its derived labels), or
 // ErrNotFound.
 func (s *Store) GetIssue(id string) (domain.Issue, error) {
-	issue, err := scanIssue(s.db.QueryRow(`SELECT `+issueColumns+` FROM issues WHERE id = ?`, id))
+	// Read the row and its labels in one transaction so a concurrent label
+	// mutation can't yield an updated_at/labels combination that never existed.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.Issue{}, err
+	}
+	defer tx.Rollback()
+
+	issue, err := scanIssue(tx.QueryRow(`SELECT `+issueColumns+` FROM issues WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Issue{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return domain.Issue{}, fmt.Errorf("get issue: %w", err)
 	}
-	if issue.Labels, err = s.LabelsForIssue(id); err != nil {
+	if issue.Labels, err = labelsFor(tx, id); err != nil {
 		return domain.Issue{}, err
 	}
 	return issue, nil
@@ -177,27 +185,36 @@ func (s *Store) ListIssues(f domain.IssueFilter) ([]domain.Issue, error) {
 	}
 	q += " ORDER BY created_at, id"
 
-	rows, err := s.db.Query(q, args...)
+	// One read transaction for the row set and every issue's labels, so the
+	// list is a consistent snapshot: a concurrent label mutation can't make a
+	// hydrated issue's labels disagree with the filter it matched on.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list issues: %w", err)
 	}
-	defer rows.Close()
-
 	var issues []domain.Issue
 	for rows.Next() {
 		issue, err := scanIssue(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		issues = append(issues, issue)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return nil, err
 	}
-	// Attach derived labels after the result set is closed (the single-connection
-	// pool won't run a second query while rows is open).
+	rows.Close() // close before the label queries reuse the transaction
+
 	for i := range issues {
-		if issues[i].Labels, err = s.LabelsForIssue(issues[i].ID); err != nil {
+		if issues[i].Labels, err = labelsFor(tx, issues[i].ID); err != nil {
 			return nil, err
 		}
 	}
