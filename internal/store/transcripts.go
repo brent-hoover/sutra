@@ -107,13 +107,20 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 	}
 
 	// Re-ingesting a linked transcript changes content tied to its issue, so
-	// advance that issue's updated_at in the same transaction.
+	// advance that issue's updated_at and record it in the ledger, in the same tx.
 	if existingIssueID.Valid {
+		now := time.Now().UTC()
 		if _, err := tx.Exec(
 			`UPDATE issues SET updated_at = ? WHERE id = ?`,
-			time.Now().UTC().Format(timeFmt), existingIssueID.String,
+			now.Format(timeFmt), existingIssueID.String,
 		); err != nil {
 			return domain.Transcript{}, fmt.Errorf("bump issue updated_at: %w", err)
+		}
+		if err := insertLedger(tx, []domain.LedgerEntry{{
+			ID: domain.NewID(), IssueID: existingIssueID.String, At: now,
+			Kind: domain.LedgerUpdated, Field: "transcript", NewValue: "re-ingested " + t.SessionID,
+		}}); err != nil {
+			return domain.Transcript{}, err
 		}
 	}
 

@@ -48,6 +48,19 @@ func (s *Server) createIssue(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listIssues(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	// Reject invalid enum filters rather than silently returning an empty list.
+	if v := q.Get("status"); v != "" && !domain.Status(v).Valid() {
+		writeError(w, http.StatusBadRequest, "invalid status filter: "+v)
+		return
+	}
+	if v := q.Get("type"); v != "" && !domain.IssueType(v).Valid() {
+		writeError(w, http.StatusBadRequest, "invalid type filter: "+v)
+		return
+	}
+	if v := q.Get("priority"); v != "" && !domain.Priority(v).Valid() {
+		writeError(w, http.StatusBadRequest, "invalid priority filter: "+v)
+		return
+	}
 	issues, err := s.svc.ListIssues(domain.IssueFilter{
 		Status:   domain.Status(q.Get("status")),
 		Type:     domain.IssueType(q.Get("type")),

@@ -38,6 +38,13 @@ func New(cfg config.Config) (*Service, error) {
 	// open (TOCTOU). MkdirAll(parent) is fine directly; the sensitive base is
 	// created and opened via the parent root, which refuses symlink traversal.
 	// Pinning at startup also means sessions added later need no daemon restart.
+	//
+	// Accepted residual risk: opening `parent` itself is still by path, so a
+	// swap of an ancestor during startup is not fully eliminated (portable Go
+	// has no way to anchor a trusted fd above this point). This is out of scope
+	// for a single-user localhost daemon whose projects dir lives under the
+	// owner's home; the real trust boundary is the daemon's auth (Slice 2). See
+	// docs — do not chase this further without that threat model changing.
 	parent, base := filepath.Dir(abs), filepath.Base(abs)
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		st.Close()

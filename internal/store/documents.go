@@ -26,11 +26,18 @@ func (s *Store) CreateDocument(doc domain.Document) error {
 	); err != nil {
 		return fmt.Errorf("insert document: %w", err)
 	}
+	now := time.Now().UTC()
 	if _, err := tx.Exec(
 		`UPDATE issues SET updated_at = ? WHERE id = ?`,
-		time.Now().UTC().Format(timeFmt), doc.IssueID,
+		now.Format(timeFmt), doc.IssueID,
 	); err != nil {
 		return fmt.Errorf("bump issue updated_at: %w", err)
+	}
+	if err := insertLedger(tx, []domain.LedgerEntry{{
+		ID: domain.NewID(), IssueID: doc.IssueID, At: now,
+		Kind: domain.LedgerUpdated, Field: "document", NewValue: "attached " + string(doc.Kind),
+	}}); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -139,6 +146,12 @@ func (s *Store) UpdateDocument(id, content string) (domain.Document, error) {
 	); err != nil {
 		return domain.Document{}, fmt.Errorf("bump issue updated_at: %w", err)
 	}
+	if err := insertLedger(tx, []domain.LedgerEntry{{
+		ID: domain.NewID(), IssueID: doc.IssueID, At: now,
+		Kind: domain.LedgerUpdated, Field: "document", NewValue: "updated " + string(doc.Kind),
+	}}); err != nil {
+		return domain.Document{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Document{}, err
 	}
@@ -163,11 +176,18 @@ func (s *Store) DeleteDocument(id string) error {
 	if _, err := tx.Exec(`DELETE FROM documents WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete document: %w", err)
 	}
+	now := time.Now().UTC()
 	if _, err := tx.Exec(
 		`UPDATE issues SET updated_at = ? WHERE id = ?`,
-		time.Now().UTC().Format(timeFmt), issueID,
+		now.Format(timeFmt), issueID,
 	); err != nil {
 		return fmt.Errorf("bump issue updated_at: %w", err)
+	}
+	if err := insertLedger(tx, []domain.LedgerEntry{{
+		ID: domain.NewID(), IssueID: issueID, At: now,
+		Kind: domain.LedgerUpdated, Field: "document", OldValue: "removed " + id,
+	}}); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
