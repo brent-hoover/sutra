@@ -1,1 +1,23 @@
+# Binaries
+/sutra
+*.exe
+*.out
+
+# Test / coverage
+*.test
+coverage.out
+
+# Local data
+*.db
+*.db-*
+*.sqlite
+
+# Editor / OS
+.DS_Store
+
+# Workflow scratch dirs
 .md-review/
+.superpowers/
+
+# roborev snapshots
+/.roborev/
