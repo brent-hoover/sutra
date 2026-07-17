@@ -66,21 +66,15 @@ func (m *Model) listView() string {
 		if is.ParentID != nil {
 			line += " (child of " + cleanLine(*is.ParentID) + ")"
 		}
-		if m.width > 0 {
-			// The 2-cell cursor is always rendered; when it consumes all the
-			// width, the issue text collapses to empty rather than forcing a wrap.
-			if avail := m.width - 2; avail <= 0 {
-				line = ""
-			} else {
-				line = truncate(line, avail)
-			}
-		}
 		cursor := "  "
 		if i == m.cursor {
 			cursor = styles.cursor.Render("> ")
 			line = styles.selected.Render(line)
 		}
-		b.WriteString(cursor + line + "\n")
+		// Truncate the fully composed (styled) row to the terminal width with the
+		// ANSI-aware truncator, so it occupies exactly one line at any width —
+		// including 1-2 columns where even the cursor must be clipped.
+		b.WriteString(truncate(cursor+line, m.width) + "\n")
 	}
 	if end < len(m.issues) {
 		b.WriteString(styles.dim.Render(truncate(fmt.Sprintf("  ↓ %d more", len(m.issues)-end), m.width)) + "\n")
