@@ -124,12 +124,25 @@ func (s *Service) TranscriptsForIssue(issueID string) ([]domain.Transcript, erro
 // ~/.claude/projects; otherwise it scans the given project dir. Each file's
 // session_id, path, and ingested state is returned.
 func (s *Service) DiscoverTranscripts(dir string) ([]domain.DiscoveredTranscript, error) {
-	root := dir
-	if root == "" {
-		root = s.projectsDir
-	} else if _, err := s.resolveWithinProjects(dir); err != nil {
+	// Walk the symlink-resolved directory: WalkDir does not follow a root that
+	// is itself a symlink, so a symlinked projects dir must be resolved first.
+	var root string
+	if dir == "" {
+		resolved, err := s.resolveProjectsDir()
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil // no projects dir yet — nothing to discover
+			}
+			return nil, err
+		}
+		root = resolved
+	} else {
 		// A caller-supplied dir must live within the configured projects dir.
-		return nil, err
+		resolved, err := s.resolveWithinProjects(dir)
+		if err != nil {
+			return nil, err
+		}
+		root = resolved
 	}
 	ingested, err := s.store.IngestedSessionIDs()
 	if err != nil {

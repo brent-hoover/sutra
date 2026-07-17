@@ -294,7 +294,8 @@ func (w *world) create(subject, body string) (domain.Issue, error) {
 		return domain.Issue{}, err
 	}
 	var i domain.Issue
-	return i, json.Unmarshal([]byte(strings.TrimSpace(out)), &i)
+	err = json.Unmarshal([]byte(strings.TrimSpace(out)), &i)
+	return i, err
 }
 
 // updateIssue runs `update <id>` with flags and returns the parsed issue.
@@ -306,7 +307,8 @@ func (w *world) updateIssue(id string, flags ...string) (domain.Issue, error) {
 		return domain.Issue{}, err
 	}
 	var i domain.Issue
-	return i, json.Unmarshal([]byte(strings.TrimSpace(out)), &i)
+	err = json.Unmarshal([]byte(strings.TrimSpace(out)), &i)
+	return i, err
 }
 
 // listIssues runs `list` with optional filter flags and returns the parsed set.
@@ -318,7 +320,8 @@ func (w *world) listIssues(flags ...string) ([]domain.Issue, error) {
 		return nil, err
 	}
 	var issues []domain.Issue
-	return issues, json.Unmarshal([]byte(strings.TrimSpace(out)), &issues)
+	err = json.Unmarshal([]byte(strings.TrimSpace(out)), &issues)
+	return issues, err
 }
 
 func containsIssue(issues []domain.Issue, id string) bool {
@@ -735,15 +738,15 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		if w.err != nil {
 			return w.err
 		}
-		w.attachDoc(w.issue.ID, string(domain.DocProblem), "The problem", "problem body")
+		w.attachDoc(w.issue.ID, string(domain.DocProblem), "Root cause writeup", "problem body")
 		if w.err != nil {
 			return w.err
 		}
-		w.attachDoc(w.issue.ID, string(domain.DocDesign), "The design", "design body")
+		w.attachDoc(w.issue.ID, string(domain.DocDesign), "Chosen approach", "design body")
 		if w.err != nil {
 			return w.err
 		}
-		w.attachDoc(w.issue.ID, string(domain.DocPlan), "The plan", "plan body")
+		w.attachDoc(w.issue.ID, string(domain.DocPlan), "Rollout steps", "plan body")
 		return w.err
 	})
 	sc.Step(`^I list its documents$`, func() error {

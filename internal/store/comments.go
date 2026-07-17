@@ -23,9 +23,11 @@ func (s *Store) CreateComment(c domain.Comment, ledger []domain.LedgerEntry) err
 	}
 
 	// A comment is a change to the issue: advance its updated_at in the same tx.
+	// The timestamp is generated here (inside the serialized transaction), not
+	// by the caller, so it cannot regress below a concurrently-committed change.
 	if _, err := tx.Exec(
 		`UPDATE issues SET updated_at = ? WHERE id = ?`,
-		c.CreatedAt.Format(timeFmt), c.IssueID,
+		time.Now().UTC().Format(timeFmt), c.IssueID,
 	); err != nil {
 		return fmt.Errorf("bump issue updated_at: %w", err)
 	}

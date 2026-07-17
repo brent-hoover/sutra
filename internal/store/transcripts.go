@@ -159,6 +159,15 @@ func (s *Store) LinkTranscript(transcriptID, issueID string, entry domain.Ledger
 		return domain.Transcript{}, fmt.Errorf("insert ledger: %w", err)
 	}
 
+	// Linking is a change to the issue: advance its updated_at in the same tx,
+	// with a timestamp generated here so it cannot regress.
+	if _, err := tx.Exec(
+		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		time.Now().UTC().Format(timeFmt), issueID,
+	); err != nil {
+		return domain.Transcript{}, fmt.Errorf("bump issue updated_at: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return domain.Transcript{}, err
 	}
