@@ -152,6 +152,9 @@ func (s *Store) GetIssue(id string) (domain.Issue, error) {
 	if err != nil {
 		return domain.Issue{}, fmt.Errorf("get issue: %w", err)
 	}
+	if afterIssueReadHook != nil {
+		afterIssueReadHook()
+	}
 	if issue.Labels, err = labelsFor(tx, id); err != nil {
 		return domain.Issue{}, err
 	}
@@ -213,6 +216,9 @@ func (s *Store) ListIssues(f domain.IssueFilter) ([]domain.Issue, error) {
 	}
 	rows.Close() // close before the label queries reuse the transaction
 
+	if afterIssueReadHook != nil {
+		afterIssueReadHook()
+	}
 	for i := range issues {
 		if issues[i].Labels, err = labelsFor(tx, issues[i].ID); err != nil {
 			return nil, err
