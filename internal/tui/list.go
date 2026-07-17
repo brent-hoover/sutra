@@ -22,10 +22,10 @@ func (m *Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 	case "r":
-		return m, m.loadIssuesCmd()
+		return m, m.loadIssuesCmd(m.bumpGen())
 	case "enter":
 		if len(m.issues) > 0 {
-			return m, m.loadDetailCmd(m.issues[m.cursor].ID, m.nextDetailSeq())
+			return m, m.loadDetailCmd(m.issues[m.cursor].ID, m.bumpGen())
 		}
 	case "n":
 		m.openCreateForm()

@@ -44,7 +44,7 @@ func (m *Model) openCreateForm() {
 		title:   "New issue",
 		fields:  []field{{label: "subject"}, {label: "body"}},
 	}
-	m.nextDetailSeq() // invalidate any in-flight detail load
+	m.bumpGen() // invalidate any in-flight load
 	m.mode = formMode
 }
 
@@ -55,7 +55,7 @@ func (m *Model) openChildForm(parent domain.Issue) {
 		fields:   []field{{label: "subject"}, {label: "body"}},
 		parentID: parent.ID,
 	}
-	m.nextDetailSeq() // invalidate any in-flight detail load
+	m.bumpGen() // invalidate any in-flight load
 	m.mode = formMode
 }
 
@@ -71,7 +71,7 @@ func (m *Model) openEditForm(issue domain.Issue) {
 			{label: "owner", placeholder: issue.Owner},
 		},
 	}
-	m.nextDetailSeq() // invalidate any in-flight detail load
+	m.bumpGen() // invalidate any in-flight load
 	m.mode = formMode
 }
 
@@ -82,7 +82,7 @@ func (m *Model) openCommentForm(issueID string) {
 		targetID: issueID,
 		fields:   []field{{label: "body"}, {label: "author"}},
 	}
-	m.nextDetailSeq() // invalidate any in-flight detail load
+	m.bumpGen() // invalidate any in-flight load
 	m.mode = formMode
 }
 
@@ -90,6 +90,10 @@ func (m *Model) openCommentForm(issueID string) {
 func (m *Model) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
+		// Abandon the form: drop any in-flight submit and clear the guard so a
+		// late response cannot land on the screen we return to.
+		m.submitting = false
+		m.bumpGen()
 		m.mode = m.formReturnMode()
 		return m, nil
 	case tea.KeyEnter:
@@ -140,18 +144,21 @@ func (m *Model) fieldValue(label string) string {
 	return ""
 }
 
-// submitForm turns the form into the appropriate client command.
+// submitForm turns the form into the appropriate client command. The command
+// is tagged with a fresh generation so navigating away before it returns drops
+// its result instead of letting it land on another screen.
 func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 	m.submitting = true
+	g := m.bumpGen()
 	switch m.form.purpose {
 	case createForm:
-		return m, m.createIssueCmd(m.fieldValue("subject"), m.fieldValue("body"), "")
+		return m, m.createIssueCmd(m.fieldValue("subject"), m.fieldValue("body"), "", g)
 	case childForm:
-		return m, m.createIssueCmd(m.fieldValue("subject"), m.fieldValue("body"), m.form.parentID)
+		return m, m.createIssueCmd(m.fieldValue("subject"), m.fieldValue("body"), m.form.parentID, g)
 	case editForm:
-		return m, m.updateIssueCmd(m.form.targetID, m.editFields())
+		return m, m.updateIssueCmd(m.form.targetID, m.editFields(), g)
 	case commentForm:
-		return m, m.addCommentCmd(m.form.targetID, m.fieldValue("author"), m.fieldValue("body"))
+		return m, m.addCommentCmd(m.form.targetID, m.fieldValue("author"), m.fieldValue("body"), g)
 	}
 	return m, nil
 }

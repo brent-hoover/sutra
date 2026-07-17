@@ -40,10 +40,15 @@ type Model struct {
 	issues []domain.Issue
 	cursor int
 
-	detail    *issueDetail
-	viewport  viewport.Model
-	vpReady   bool
-	detailSeq int // generation for detail loads; stale responses are dropped
+	detail   *issueDetail
+	viewport viewport.Model
+	vpReady  bool
+
+	// gen is the navigation generation. It advances on every user action that
+	// starts async work; each command captures it and its response is dropped
+	// if gen has since moved on, so a late response cannot overwrite the
+	// current screen or clobber a newer request.
+	gen int
 
 	form       form
 	submitting bool // a form command is in flight; ignore repeat submits
@@ -66,7 +71,7 @@ func New(ctx context.Context, c *client.Client) *Model {
 
 // Init loads the issue list.
 func (m *Model) Init() tea.Cmd {
-	return m.loadIssuesCmd()
+	return m.loadIssuesCmd(m.gen)
 }
 
 // Update reduces a message into new model state, returning any follow-up command.
@@ -78,6 +83,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case issuesLoadedMsg:
+		if msg.gen != m.gen {
+			return m, nil // stale
+		}
 		m.err = msg.err
 		if msg.err == nil {
 			m.issues = msg.issues
@@ -88,6 +96,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case issueCreatedMsg:
+		if msg.gen != m.gen {
+			return m, nil // stale
+		}
 		m.submitting = false
 		m.err = msg.err
 		if msg.err == nil {
@@ -99,26 +110,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "created " + msg.issue.ID
 			}
 			m.mode = listMode
-			return m, m.loadIssuesCmd()
+			return m, m.loadIssuesCmd(m.gen)
 		}
 		return m, nil
 
 	case issueUpdatedMsg:
+		if msg.gen != m.gen {
+			return m, nil // stale
+		}
 		m.submitting = false
 		m.err = msg.err
 		if msg.err == nil {
 			m.statusMsg = "updated " + msg.issue.ID
 			if m.detail != nil && m.detail.issue.ID == msg.issue.ID {
 				m.mode = detailMode
-				return m, m.loadDetailCmd(msg.issue.ID, m.nextDetailSeq())
+				return m, m.loadDetailCmd(msg.issue.ID, m.gen)
 			}
 			m.mode = listMode
-			return m, m.loadIssuesCmd()
+			return m, m.loadIssuesCmd(m.gen)
 		}
 		return m, nil
 
 	case detailLoadedMsg:
-		if msg.seq != m.detailSeq {
+		if msg.gen != m.gen {
 			return m, nil // stale: the user has navigated since this load began
 		}
 		m.err = msg.err
@@ -134,6 +148,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case commentAddedMsg:
+		if msg.gen != m.gen {
+			return m, nil // stale
+		}
 		m.submitting = false
 		m.err = msg.err
 		if msg.err == nil {
@@ -141,7 +158,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "commented on " + id
 			if m.detail != nil && m.detail.issue.ID == id {
 				m.mode = detailMode
-				return m, m.loadDetailCmd(id, m.nextDetailSeq()) // re-fetch so the new comment shows
+				return m, m.loadDetailCmd(id, m.gen) // re-fetch so the new comment shows
 			}
 		}
 		return m, nil
@@ -183,12 +200,12 @@ func (m *Model) View() string {
 	}
 }
 
-// nextDetailSeq advances and returns the detail-load generation. Any in-flight
-// detail load tagged with an older generation is dropped when its response
-// arrives, so navigating away cannot be clobbered by a late response.
-func (m *Model) nextDetailSeq() int {
-	m.detailSeq++
-	return m.detailSeq
+// bumpGen advances and returns the navigation generation. Any in-flight command
+// tagged with an older generation is dropped when its response arrives, so
+// navigating away cannot be clobbered by a late response.
+func (m *Model) bumpGen() int {
+	m.gen++
+	return m.gen
 }
 
 func (m *Model) resizeViewport() {
