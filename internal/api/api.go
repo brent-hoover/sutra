@@ -4,12 +4,32 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/brent-hoover/sutra/internal/config"
 	"github.com/brent-hoover/sutra/internal/service"
 )
+
+// isLoopbackAddr reports whether a listen address binds only the loopback
+// interface. An empty host (e.g. ":8422") binds all interfaces and is not
+// loopback.
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
 
 // Server holds the dependencies the HTTP handlers need.
 type Server struct {
@@ -77,6 +97,12 @@ func authMiddleware(token string, next http.Handler) http.Handler {
 // Run opens the service and serves HTTP on the configured address. It blocks
 // until ctx is cancelled (then it shuts down gracefully) or the server fails.
 func Run(ctx context.Context, cfg config.Config) error {
+	// Never expose an unauthenticated daemon beyond loopback: require a token
+	// when binding to a non-loopback (LAN/all-interfaces) address.
+	if cfg.Token == "" && !isLoopbackAddr(cfg.ListenAddr) {
+		return fmt.Errorf("refusing to serve on non-loopback address %q without SUTRA_TOKEN set", cfg.ListenAddr)
+	}
+
 	svc, err := service.New(cfg)
 	if err != nil {
 		return err
