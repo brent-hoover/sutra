@@ -50,10 +50,7 @@ func (s *Service) UpdateDocument(id, content string) (domain.Document, error) {
 	if content == "" {
 		return domain.Document{}, domain.ErrInvalidDocument
 	}
-	if _, err := s.store.UpdateDocument(id, content); err != nil {
-		return domain.Document{}, err
-	}
-	return s.store.GetDocument(id)
+	return s.store.UpdateDocument(id, content)
 }
 
 // RemoveDocument deletes the document.

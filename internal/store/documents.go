@@ -22,24 +22,22 @@ func (s *Store) CreateDocument(doc domain.Document) error {
 	return nil
 }
 
-// GetDocument returns the document with the given id, or ErrNotFound.
-func (s *Store) GetDocument(id string) (domain.Document, error) {
+const documentColumns = `id, issue_id, kind, title, content, created_at, updated_at`
+
+// scanDocument reads one document row in documentColumns order.
+func scanDocument(row rowScanner) (domain.Document, error) {
 	var (
 		doc                  domain.Document
 		kind                 string
 		createdAt, updatedAt string
 	)
-	err := s.db.QueryRow(
-		`SELECT id, issue_id, kind, title, content, created_at, updated_at
-		 FROM documents WHERE id = ?`, id,
-	).Scan(&doc.ID, &doc.IssueID, &kind, &doc.Title, &doc.Content, &createdAt, &updatedAt)
+	err := row.Scan(&doc.ID, &doc.IssueID, &kind, &doc.Title, &doc.Content, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Document{}, domain.ErrNotFound
 	}
 	if err != nil {
-		return domain.Document{}, fmt.Errorf("get document: %w", err)
+		return domain.Document{}, fmt.Errorf("scan document: %w", err)
 	}
-
 	doc.Kind = domain.DocumentKind(kind)
 	if doc.CreatedAt, err = time.Parse(timeFmt, createdAt); err != nil {
 		return domain.Document{}, fmt.Errorf("parse created_at: %w", err)
@@ -48,6 +46,12 @@ func (s *Store) GetDocument(id string) (domain.Document, error) {
 		return domain.Document{}, fmt.Errorf("parse updated_at: %w", err)
 	}
 	return doc, nil
+}
+
+// GetDocument returns the document with the given id, or ErrNotFound.
+func (s *Store) GetDocument(id string) (domain.Document, error) {
+	return scanDocument(s.db.QueryRow(
+		`SELECT `+documentColumns+` FROM documents WHERE id = ?`, id))
 }
 
 // DocumentsForIssue returns an issue's documents, oldest first.
@@ -86,10 +90,10 @@ func (s *Store) DocumentsForIssue(issueID string) ([]domain.Document, error) {
 // returning ErrNotFound if it does not exist. The timestamp is generated inside
 // the write transaction so that, under concurrent updates serialized on the
 // single connection, the last write always carries the latest updated_at.
-func (s *Store) UpdateDocument(id, content string) (time.Time, error) {
+func (s *Store) UpdateDocument(id, content string) (domain.Document, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return time.Time{}, err
+		return domain.Document{}, err
 	}
 	defer tx.Rollback()
 
@@ -99,19 +103,26 @@ func (s *Store) UpdateDocument(id, content string) (time.Time, error) {
 		content, now.Format(timeFmt), id,
 	)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("update document: %w", err)
+		return domain.Document{}, fmt.Errorf("update document: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return time.Time{}, fmt.Errorf("update document rows: %w", err)
+		return domain.Document{}, fmt.Errorf("update document rows: %w", err)
 	}
 	if n == 0 {
-		return time.Time{}, domain.ErrNotFound
+		return domain.Document{}, domain.ErrNotFound
+	}
+	// Read the row back inside the same transaction so the returned document
+	// reflects exactly this update, never a concurrently-committed one.
+	doc, err := scanDocument(tx.QueryRow(
+		`SELECT `+documentColumns+` FROM documents WHERE id = ?`, id))
+	if err != nil {
+		return domain.Document{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return time.Time{}, err
+		return domain.Document{}, err
 	}
-	return now, nil
+	return doc, nil
 }
 
 // DeleteDocument removes the document, returning ErrNotFound if it does not exist.

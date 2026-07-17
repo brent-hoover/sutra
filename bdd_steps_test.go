@@ -1,10 +1,13 @@
 package main_test
 
-// Step definitions for implemented scenarios (tagged @slice1). Each scenario
-// drives the real binary surface: config.Load reads the environment, the
-// actual Cobra `serve` command starts the daemon (graceful shutdown on ctx
-// cancel), and `create`/`view` run as real Cobra commands whose --json output
-// is parsed. A second service handle on the same DB verifies ledger writes.
+// Step definitions for the implemented scenarios, tagged @slice1 (create,
+// view, serve), @slice3 (list, update, comment, soft-delete, history, filter),
+// @slice5 (document attach/read/list/update/remove), and @slice6 (transcript
+// ingest/re-ingest/link/view/read/discover). Each scenario drives the real
+// binary surface: config.Load reads the environment, the actual Cobra `serve`
+// command starts the daemon (graceful shutdown on ctx cancel), and the CLI
+// subcommands run as real Cobra commands whose --json output is parsed. A
+// second service handle on the same DB verifies ledger and stored state.
 
 import (
 	"context"

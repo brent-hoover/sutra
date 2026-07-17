@@ -135,6 +135,19 @@ func (s *Store) LinkTranscript(transcriptID, issueID string, entry domain.Ledger
 	}
 	defer tx.Rollback()
 
+	// The transcript must exist; reject relinking it to a different issue (that
+	// would silently drop it from the prior issue with no audit trail there).
+	var current sql.NullString
+	if err := tx.QueryRow(`SELECT issue_id FROM transcripts WHERE id = ?`, transcriptID).Scan(&current); errors.Is(err, sql.ErrNoRows) {
+		return domain.Transcript{}, domain.ErrNotFound
+	} else if err != nil {
+		return domain.Transcript{}, fmt.Errorf("lookup transcript: %w", err)
+	}
+	if current.Valid && current.String != issueID {
+		return domain.Transcript{}, errors.Join(domain.ErrInvalidTranscript,
+			fmt.Errorf("transcript already linked to issue %s", current.String))
+	}
+
 	var exists int
 	if err := tx.QueryRow(`SELECT 1 FROM issues WHERE id = ?`, issueID).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
 		return domain.Transcript{}, domain.ErrNotFound
@@ -142,12 +155,8 @@ func (s *Store) LinkTranscript(transcriptID, issueID string, entry domain.Ledger
 		return domain.Transcript{}, fmt.Errorf("lookup issue: %w", err)
 	}
 
-	res, err := tx.Exec(`UPDATE transcripts SET issue_id = ? WHERE id = ?`, issueID, transcriptID)
-	if err != nil {
+	if _, err := tx.Exec(`UPDATE transcripts SET issue_id = ? WHERE id = ?`, issueID, transcriptID); err != nil {
 		return domain.Transcript{}, fmt.Errorf("link transcript: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return domain.Transcript{}, domain.ErrNotFound
 	}
 
 	if _, err := tx.Exec(
