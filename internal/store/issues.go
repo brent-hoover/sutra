@@ -71,9 +71,11 @@ func (s *Store) GetIssue(id string) (domain.Issue, error) {
 		issue.ParentID = &parentID.String
 	}
 	if deletedAt.Valid {
-		if t, err := time.Parse(timeFmt, deletedAt.String); err == nil {
-			issue.DeletedAt = &t
+		t, err := time.Parse(timeFmt, deletedAt.String)
+		if err != nil {
+			return domain.Issue{}, fmt.Errorf("parse deleted_at: %w", err)
 		}
+		issue.DeletedAt = &t
 	}
 	if issue.CreatedAt, err = time.Parse(timeFmt, createdAt); err != nil {
 		return domain.Issue{}, fmt.Errorf("parse created_at: %w", err)

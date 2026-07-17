@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/brent-hoover/sutra/internal/client"
@@ -69,15 +70,16 @@ func outputDetail(cmd *cobra.Command, res client.IssueResult) error {
 		return err
 	}
 	i := res.Issue
-	w := cmd.OutOrStdout()
-	fmt.Fprintf(w, "id:       %s\n", i.ID)
-	fmt.Fprintf(w, "subject:  %s\n", i.Subject)
-	fmt.Fprintf(w, "type:     %s\n", i.Type)
-	fmt.Fprintf(w, "status:   %s\n", i.Status)
-	fmt.Fprintf(w, "priority: %s\n", i.Priority)
+	var b strings.Builder
+	fmt.Fprintf(&b, "id:       %s\n", i.ID)
+	fmt.Fprintf(&b, "subject:  %s\n", i.Subject)
+	fmt.Fprintf(&b, "type:     %s\n", i.Type)
+	fmt.Fprintf(&b, "status:   %s\n", i.Status)
+	fmt.Fprintf(&b, "priority: %s\n", i.Priority)
 	if i.Owner != "" {
-		fmt.Fprintf(w, "owner:    %s\n", i.Owner)
+		fmt.Fprintf(&b, "owner:    %s\n", i.Owner)
 	}
-	fmt.Fprintf(w, "\n%s\n", i.Body)
-	return nil
+	fmt.Fprintf(&b, "\n%s\n", i.Body)
+	_, err := io.WriteString(cmd.OutOrStdout(), b.String())
+	return err
 }

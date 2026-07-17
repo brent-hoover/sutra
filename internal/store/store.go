@@ -23,11 +23,18 @@ func Open(path string) (*Store, error) {
 	// opens them; MkdirAll does not tighten an already-existing directory, so
 	// chmod it explicitly.
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		_, statErr := os.Stat(dir)
+		created := os.IsNotExist(statErr)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("create db dir: %w", err)
 		}
-		if err := os.Chmod(dir, 0o700); err != nil {
-			return nil, fmt.Errorf("secure db dir: %w", err)
+		// Only tighten a directory we created — never strip permissions from a
+		// pre-existing shared/project directory the user chose. The DB file and
+		// its sidecars are 0600 below, so data stays private regardless.
+		if created {
+			if err := os.Chmod(dir, 0o700); err != nil {
+				return nil, fmt.Errorf("secure db dir: %w", err)
+			}
 		}
 	}
 	// Create (or open) the main file owner-only before SQLite touches it.
