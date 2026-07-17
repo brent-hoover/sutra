@@ -229,3 +229,31 @@ func TestRelinkIdempotentAndConflict(t *testing.T) {
 		t.Errorf("relink to different issue: err = %v, want ErrInvalidTranscript", err)
 	}
 }
+
+// Re-ingesting a linked transcript must advance the owning issue's updated_at.
+func TestReingestLinkedBumpsIssueUpdatedAt(t *testing.T) {
+	projectsDir := t.TempDir()
+	svc := newService(t, projectsDir)
+	path := writeSession(t, filepath.Join(projectsDir, "-Users-me-proj"), "reingestbump", sessionLines())
+
+	tr, err := svc.IngestTranscript(path)
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	iss, err := svc.CreateIssue("Linked", "body")
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	if _, err := svc.LinkTranscript(tr.ID, iss.ID); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	before := issueUpdatedAt(t, svc, iss.ID)
+
+	if _, err := svc.IngestTranscript(path); err != nil { // re-ingest same session
+		t.Fatalf("re-ingest: %v", err)
+	}
+	after := issueUpdatedAt(t, svc, iss.ID)
+	if !after.After(before) {
+		t.Errorf("re-ingest did not advance linked issue updated_at: %s !> %s", after, before)
+	}
+}
