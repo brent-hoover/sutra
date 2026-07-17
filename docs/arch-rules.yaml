@@ -1,0 +1,25 @@
+# Machine-readable architecture rules. Source of truth for generated
+# architecture tests (Go: architecture_test.go). Module names are
+# language-neutral; paths are derived at scaffold time (Go: internal/<module>).
+version: 1
+language: go
+root: sutra
+modules:
+  - name: domain
+    may_import: []
+  - name: config
+    may_import: []
+  - name: store
+    may_import: [domain, config]
+  - name: service
+    may_import: [domain, store, config]
+  - name: api
+    may_import: [domain, service, config]
+  - name: client
+    may_import: [domain, config]
+  - name: tui
+    may_import: [domain, client]
+  - name: cli
+    may_import: [domain, client, api, config]
+rules:
+  - no_cycles: true
