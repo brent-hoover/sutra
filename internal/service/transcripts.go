@@ -35,16 +35,19 @@ func (s *Service) IngestTranscript(path string) (domain.Transcript, error) {
 			fmt.Errorf("path %q is not a .jsonl file", path))
 	}
 
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return domain.Transcript{}, err
-	}
-	info, err := os.Stat(abs)
+	// Stat and open the fully-resolved (symlink-free) path, never the caller's
+	// original — otherwise a symlink swap between validation and open (TOCTOU)
+	// could escape the projects dir. Require a regular file.
+	info, err := os.Stat(resolved)
 	if err != nil {
 		return domain.Transcript{}, fmt.Errorf("stat transcript: %w", err)
 	}
+	if !info.Mode().IsRegular() {
+		return domain.Transcript{}, errors.Join(domain.ErrInvalidTranscript,
+			fmt.Errorf("path %q is not a regular file", path))
+	}
 
-	f, err := os.Open(abs)
+	f, err := os.Open(resolved)
 	if err != nil {
 		return domain.Transcript{}, fmt.Errorf("open transcript: %w", err)
 	}
@@ -53,8 +56,8 @@ func (s *Service) IngestTranscript(path string) (domain.Transcript, error) {
 	now := time.Now().UTC()
 	t := domain.Transcript{
 		ID:         domain.NewID(),
-		SessionID:  sessionIDFromPath(abs),
-		SourcePath: abs,
+		SessionID:  sessionIDFromPath(resolved),
+		SourcePath: resolved,
 		CreatedAt:  now,
 	}
 
