@@ -27,17 +27,19 @@ import (
 )
 
 type world struct {
-	dir      string
-	cfg      config.Config
-	verify   *service.Service // second handle for reading ledger state
-	serveCtx context.Context
-	cancel   context.CancelFunc
-	serveCh  chan error // receives the serve command's exit error
-	subject  string
-	body     string
-	issue    domain.Issue
-	viewOut  string
-	err      error
+	dir         string
+	cfg         config.Config
+	verify      *service.Service // second handle for reading ledger state
+	serveCtx    context.Context
+	cancel      context.CancelFunc
+	serveCh     chan error // receives the serve command's exit error
+	serveExited bool       // set once the serve exit has been observed
+	serveErr    error      // the observed serve exit error, if any
+	subject     string
+	body        string
+	issue       domain.Issue
+	viewOut     string
+	err         error
 }
 
 func freeLoopbackAddr() (string, error) {
@@ -92,6 +94,7 @@ func (w *world) waitListening(addr string) error {
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-w.serveCh:
+			w.serveExited, w.serveErr = true, err
 			return fmt.Errorf("serve command exited before listening: %w", err)
 		default:
 		}
@@ -114,14 +117,23 @@ func (w *world) teardown() error {
 	shutdownConfirmed := w.cancel == nil
 	if w.cancel != nil {
 		w.cancel()
-		select {
-		case serveErr := <-w.serveCh:
-			if serveErr != nil {
-				errs = append(errs, fmt.Errorf("serve exited with error: %w", serveErr))
+		switch {
+		case w.serveExited:
+			// The daemon already exited (observed during setup); don't block.
+			if w.serveErr != nil {
+				errs = append(errs, fmt.Errorf("serve exited with error: %w", w.serveErr))
 			}
 			shutdownConfirmed = true
-		case <-time.After(5 * time.Second):
-			errs = append(errs, fmt.Errorf("timed out waiting for daemon to shut down"))
+		default:
+			select {
+			case serveErr := <-w.serveCh:
+				if serveErr != nil {
+					errs = append(errs, fmt.Errorf("serve exited with error: %w", serveErr))
+				}
+				shutdownConfirmed = true
+			case <-time.After(5 * time.Second):
+				errs = append(errs, fmt.Errorf("timed out waiting for daemon to shut down"))
+			}
 		}
 	}
 	if w.verify != nil {

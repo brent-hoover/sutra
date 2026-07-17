@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/brent-hoover/sutra/internal/domain"
@@ -15,8 +16,13 @@ type createIssueRequest struct {
 
 func (s *Server) createIssue(w http.ResponseWriter, r *http.Request) {
 	var req createIssueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "unexpected trailing data in body")
 		return
 	}
 	issue, err := s.svc.CreateIssue(req.Subject, req.Body)
