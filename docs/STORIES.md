@@ -18,7 +18,8 @@ As a developer, I want to create an issue with a subject and body so that work i
 **Acceptance criteria:**
 - Given no other input, When I create an issue with a subject and body, Then it is stored with a generated `id` and defaults `type=task`, `status=open`, `priority=p2`, and timestamps set
 - Given a new issue is created, When it is stored, Then a `LedgerEntry` of kind `created` is appended
-- Given a missing subject or body, When I try to create the issue, Then it is rejected
+- Given a missing body, When I try to create the issue, Then it is rejected
+- Given a missing subject, When I try to create the issue, Then it is rejected
 
 **Priority:** must
 

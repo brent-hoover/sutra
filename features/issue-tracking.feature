@@ -8,7 +8,10 @@ Feature: Issue tracking
     Given a new issue is created
     When it is stored
     Then a LedgerEntry of kind created is appended
-    Given a missing subject or body
+    Given a missing body
+    When I try to create the issue
+    Then it is rejected
+    Given a missing subject
     When I try to create the issue
     Then it is rejected
 

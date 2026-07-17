@@ -17,8 +17,11 @@ type Store struct {
 // Open opens (creating if needed) the SQLite database at path and applies
 // the schema migrations.
 func Open(path string) (*Store, error) {
+	// 0700 keeps the DB and its -wal/-shm sidecars unreadable by other local
+	// users — otherwise they could read data straight from disk, bypassing the
+	// daemon's authentication.
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("create db dir: %w", err)
 		}
 	}
@@ -38,6 +41,11 @@ func Open(path string) (*Store, error) {
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
+	}
+	// The DB file now exists (migrate wrote to it); restrict it to the owner.
+	if err := os.Chmod(path, 0o600); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("restrict db perms: %w", err)
 	}
 	return s, nil
 }

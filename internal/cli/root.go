@@ -1,6 +1,11 @@
 package cli
 
 import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/brent-hoover/sutra/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -23,7 +28,10 @@ func NewRoot(cfg config.Config) *cobra.Command {
 	return root
 }
 
-// Execute builds and runs the root command from process configuration.
+// Execute builds and runs the root command from process configuration, under a
+// context cancelled on SIGINT/SIGTERM so `serve` shuts down gracefully.
 func Execute() error {
-	return NewRoot(config.Load()).Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return NewRoot(config.Load()).ExecuteContext(ctx)
 }

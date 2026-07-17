@@ -74,7 +74,8 @@ To let multiple agents work concurrently after S2 without colliding:
   JSON-endpoint + thin-CLI pattern every later slice follows. Localhost, no
   auth yet.
 - **Verify:** `sutra serve &`, then `sutra create --subject x --body y`
-  followed by `sutra view <id>` returns the issue as JSON.
+  followed by `sutra view <id>` prints the issue's core fields (add `--json`
+  on any command for the raw API response).
 
 ## Slice 2: Transport contract & hardening
 - **Stories:** JSON API covers every operation · CLI is a thin client ·

@@ -35,7 +35,7 @@ type world struct {
 	subject  string
 	body     string
 	issue    domain.Issue
-	viewed   domain.Issue
+	viewOut  string
 	err      error
 }
 
@@ -193,8 +193,12 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		}
 		return fmt.Errorf("no LedgerEntry of kind created found (%d entries)", len(history))
 	})
-	sc.Step(`^a missing subject or body$`, func() error {
+	sc.Step(`^a missing body$`, func() error {
 		w.subject, w.body = "Has a subject", ""
+		return nil
+	})
+	sc.Step(`^a missing subject$`, func() error {
+		w.subject, w.body = "", "Has a body"
 		return nil
 	})
 	sc.Step(`^I try to create the issue$`, func() error {
@@ -214,23 +218,26 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		return w.err
 	})
 	sc.Step(`^I view it by id$`, func() error {
-		out, err := w.runCLI("view", w.issue.ID, "--json")
-		if err != nil {
-			w.err = err
-			return nil
-		}
-		w.err = json.Unmarshal([]byte(strings.TrimSpace(out)), &w.viewed)
+		// Use the documented default invocation (no --json) so a human
+		// renderer that drops fields cannot hide behind raw JSON.
+		w.viewOut, w.err = w.runCLI("view", w.issue.ID)
 		return nil
 	})
 	sc.Step(`^its core fields are returned$`, func() error {
 		if w.err != nil {
 			return fmt.Errorf("view failed: %w", w.err)
 		}
-		if w.viewed.ID != w.issue.ID || w.viewed.Subject != w.issue.Subject || w.viewed.Body != w.issue.Body {
-			return fmt.Errorf("viewed issue does not match created issue")
-		}
-		if w.viewed.Type != w.issue.Type || w.viewed.Status != w.issue.Status || w.viewed.Priority != w.issue.Priority {
-			return fmt.Errorf("viewed issue metadata does not match")
+		for label, want := range map[string]string{
+			"id":       w.issue.ID,
+			"subject":  w.issue.Subject,
+			"body":     w.issue.Body,
+			"type":     string(w.issue.Type),
+			"status":   string(w.issue.Status),
+			"priority": string(w.issue.Priority),
+		} {
+			if !strings.Contains(w.viewOut, want) {
+				return fmt.Errorf("view output missing %s (%q):\n%s", label, want, w.viewOut)
+			}
 		}
 		return nil
 	})
