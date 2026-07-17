@@ -145,7 +145,7 @@ func (w *world) setup() error {
 	}
 
 	var err2 error
-	if w.verify, err2 = service.New(config.Config{DBPath: w.cfg.DBPath}); err2 != nil {
+	if w.verify, err2 = service.New(config.Config{DBPath: w.cfg.DBPath, ProjectsDir: w.cfg.ProjectsDir}); err2 != nil {
 		return err2
 	}
 	return nil
@@ -1044,44 +1044,61 @@ func registerSlice3Steps(sc *godog.ScenarioContext, w *world) {
 	// --- Filter issues ---
 	sc.Step(`^issues with varied status, type, priority, labels, and owner$`, func() error {
 		w.issues = nil
-		// I1: bug + open (default status)
+		// I1: bug, open, p1, owner agent-alpha
 		i1, err := w.create("bug open", "body")
 		if err != nil {
 			return err
 		}
-		if i1, err = w.updateIssue(i1.ID, "--type", "bug"); err != nil {
+		if i1, err = w.updateIssue(i1.ID, "--type", "bug", "--priority", "p1", "--owner", "agent-alpha"); err != nil {
 			return err
 		}
-		// I2: bug + in_progress
+		// I2: bug, in_progress, p2 (default), owner agent-alpha
 		i2, err := w.create("bug in progress", "body")
 		if err != nil {
 			return err
 		}
-		if i2, err = w.updateIssue(i2.ID, "--type", "bug", "--status", "in_progress"); err != nil {
+		if i2, err = w.updateIssue(i2.ID, "--type", "bug", "--status", "in_progress", "--owner", "agent-alpha"); err != nil {
 			return err
 		}
-		// I3: task + open (defaults)
+		// I3: task, open, p3, owner agent-beta
 		i3, err := w.create("task open", "body")
 		if err != nil {
+			return err
+		}
+		if i3, err = w.updateIssue(i3.ID, "--priority", "p3", "--owner", "agent-beta"); err != nil {
 			return err
 		}
 		w.issues = []domain.Issue{i1, i2, i3}
 		return nil
 	})
 	sc.Step(`^I list with a filter such as status=open, label=bug, or owner=AGENT$`, func() error {
-		// Label filtering arrives with labels in slice 4; filter on an
-		// S3-supported field here.
+		// Label filtering arrives with labels in slice 4; exercise S3-supported
+		// fields here (status, priority, owner).
 		w.listOut, w.err = w.listIssues("--status", "open")
 		return w.err
 	})
 	sc.Step(`^only matching, non-soft-deleted issues are returned$`, func() error {
-		if len(w.listOut) == 0 {
-			return fmt.Errorf("expected matches, got none")
+		// status=open must return exactly I1 and I3, never I2 (in_progress).
+		if err := requireExactIssues(w.listOut, w.issues[0].ID, w.issues[2].ID); err != nil {
+			return fmt.Errorf("status=open filter: %w", err)
+		}
+		// priority=p1 must return exactly I1.
+		byPrio, err := w.listIssues("--priority", "p1")
+		if err != nil {
+			return err
+		}
+		if err := requireExactIssues(byPrio, w.issues[0].ID); err != nil {
+			return fmt.Errorf("priority=p1 filter: %w", err)
+		}
+		// owner=agent-beta must return exactly I3.
+		byOwner, err := w.listIssues("--owner", "agent-beta")
+		if err != nil {
+			return err
+		}
+		if err := requireExactIssues(byOwner, w.issues[2].ID); err != nil {
+			return fmt.Errorf("owner filter: %w", err)
 		}
 		for _, i := range w.listOut {
-			if i.Status != domain.StatusOpen {
-				return fmt.Errorf("issue %s has status %q, want open", i.ID, i.Status)
-			}
 			if i.DeletedAt != nil {
 				return fmt.Errorf("soft-deleted issue %s returned", i.ID)
 			}
@@ -1094,18 +1111,23 @@ func registerSlice3Steps(sc *godog.ScenarioContext, w *world) {
 		return w.err
 	})
 	sc.Step(`^results match all filters using AND$`, func() error {
-		if len(w.listOut) == 0 {
-			return fmt.Errorf("expected AND matches, got none")
-		}
-		for _, i := range w.listOut {
-			if i.Type != domain.TypeBug || i.Status != domain.StatusOpen {
-				return fmt.Errorf("issue %s (type=%q status=%q) violates AND filter", i.ID, i.Type, i.Status)
-			}
-		}
-		// I2 (bug/in_progress) and I3 (task/open) must be excluded.
-		if containsIssue(w.listOut, w.issues[1].ID) || containsIssue(w.listOut, w.issues[2].ID) {
-			return fmt.Errorf("AND filter returned non-matching issues")
+		// type=bug AND status=open must return exactly I1.
+		if err := requireExactIssues(w.listOut, w.issues[0].ID); err != nil {
+			return fmt.Errorf("type=bug AND status=open: %w", err)
 		}
 		return nil
 	})
+}
+
+// requireExactIssues asserts got contains exactly the wantIDs, no more, no less.
+func requireExactIssues(got []domain.Issue, wantIDs ...string) error {
+	if len(got) != len(wantIDs) {
+		return fmt.Errorf("got %d issues, want %d", len(got), len(wantIDs))
+	}
+	for _, id := range wantIDs {
+		if !containsIssue(got, id) {
+			return fmt.Errorf("missing expected issue %s", id)
+		}
+	}
+	return nil
 }

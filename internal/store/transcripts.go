@@ -50,9 +50,12 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 	// Reuse the existing row (id + created_at) when the session already exists.
 	// issue_id is deliberately left untouched by the UPDATE below so that
 	// re-ingesting a linked transcript preserves its issue link.
-	var existingID, existingCreated string
-	err = tx.QueryRow(`SELECT id, created_at FROM transcripts WHERE session_id = ?`, t.SessionID).
-		Scan(&existingID, &existingCreated)
+	var (
+		existingID, existingCreated string
+		existingIssueID             sql.NullString
+	)
+	err = tx.QueryRow(`SELECT id, created_at, issue_id FROM transcripts WHERE session_id = ?`, t.SessionID).
+		Scan(&existingID, &existingCreated, &existingIssueID)
 	switch {
 	case err == nil:
 		t.ID = existingID
@@ -101,6 +104,17 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		`DELETE FROM messages WHERE transcript_id = ? AND seq >= ?`, t.ID, len(t.Messages),
 	); err != nil {
 		return domain.Transcript{}, fmt.Errorf("prune messages: %w", err)
+	}
+
+	// Re-ingesting a linked transcript changes content tied to its issue, so
+	// advance that issue's updated_at in the same transaction.
+	if existingIssueID.Valid {
+		if _, err := tx.Exec(
+			`UPDATE issues SET updated_at = ? WHERE id = ?`,
+			time.Now().UTC().Format(timeFmt), existingIssueID.String,
+		); err != nil {
+			return domain.Transcript{}, fmt.Errorf("bump issue updated_at: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

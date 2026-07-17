@@ -14,7 +14,8 @@ import (
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	svc, err := service.New(config.Config{DBPath: filepath.Join(t.TempDir(), "t.db")})
+	dir := t.TempDir()
+	svc, err := service.New(config.Config{DBPath: filepath.Join(dir, "t.db"), ProjectsDir: filepath.Join(dir, "projects")})
 	if err != nil {
 		t.Fatalf("service.New: %v", err)
 	}
