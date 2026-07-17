@@ -37,7 +37,13 @@ func (s *Service) CommentIssue(issueID, author, body string) (domain.Comment, er
 	return comment, nil
 }
 
-// IssueComments returns an issue's comments in chronological order.
+// IssueComments returns an issue's comments in chronological order. It returns
+// ErrNotFound if the issue does not exist (mirroring documents, transcripts,
+// and history) so callers can 404 rather than return an empty list for a bogus
+// id.
 func (s *Service) IssueComments(issueID string) ([]domain.Comment, error) {
+	if _, err := s.store.GetIssue(issueID); err != nil {
+		return nil, err
+	}
 	return s.store.CommentsFor(issueID)
 }

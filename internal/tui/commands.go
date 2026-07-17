@@ -45,24 +45,18 @@ func (m *Model) loadIssuesCmd() tea.Cmd {
 	}
 }
 
-// createIssueCmd creates an issue. When parentID is set it is a child issue:
-// after creation the TUI sets parent_id through the update endpoint (which
-// persists it on the issue) and returns the stored child.
+// createIssueCmd creates an issue. When parentID is set it creates a child in a
+// single atomic request, so a failure leaves no orphan and a retry cannot
+// duplicate the issue.
 func (m *Model) createIssueCmd(subject, body, parentID string) tea.Cmd {
 	ctx, c := m.ctx, m.client
 	return func() tea.Msg {
-		res, err := c.CreateIssue(ctx, subject, body)
-		if err != nil {
-			return issueCreatedMsg{err: err}
-		}
 		if parentID != "" {
-			ures, uerr := c.UpdateIssue(ctx, res.Issue.ID, map[string]string{"parent_id": parentID})
-			if uerr != nil {
-				return issueCreatedMsg{err: uerr}
-			}
-			return issueCreatedMsg{issue: ures.Issue, asChild: true}
+			res, err := c.CreateChildIssue(ctx, subject, body, parentID)
+			return issueCreatedMsg{issue: res.Issue, asChild: true, err: err}
 		}
-		return issueCreatedMsg{issue: res.Issue}
+		res, err := c.CreateIssue(ctx, subject, body)
+		return issueCreatedMsg{issue: res.Issue, err: err}
 	}
 }
 

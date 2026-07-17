@@ -11,6 +11,21 @@ import (
 // CreateIssue validates input, applies defaults, persists the issue with a
 // "created" ledger entry, and returns the stored issue.
 func (s *Service) CreateIssue(subject, body string) (domain.Issue, error) {
+	return s.createIssue(subject, body, nil)
+}
+
+// CreateChildIssue creates an issue whose parent_id is set to parentID. The
+// parent must exist. Because the child is a fresh leaf, this cannot introduce a
+// cycle or a self-link, and the issue and its parent link are persisted in the
+// one insert (no orphan window). Returns ErrNotFound if the parent is missing.
+func (s *Service) CreateChildIssue(subject, body, parentID string) (domain.Issue, error) {
+	if _, err := s.store.GetIssue(parentID); err != nil {
+		return domain.Issue{}, err
+	}
+	return s.createIssue(subject, body, &parentID)
+}
+
+func (s *Service) createIssue(subject, body string, parentID *string) (domain.Issue, error) {
 	now := time.Now().UTC()
 	issue := domain.Issue{
 		ID:        domain.NewID(),
@@ -19,6 +34,7 @@ func (s *Service) CreateIssue(subject, body string) (domain.Issue, error) {
 		Type:      domain.TypeTask,
 		Status:    domain.StatusOpen,
 		Priority:  domain.P2,
+		ParentID:  parentID,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -51,15 +67,13 @@ func (s *Service) ListIssues(f domain.IssueFilter) ([]domain.Issue, error) {
 // IssueUpdate carries the fields a caller wants to change. A nil pointer means
 // "leave unchanged"; this lets callers clear a field (e.g. owner to "").
 //
-// ParentID wires the existing issues.parent_id column through the update path so
-// a child issue can record its parent. The wider parent/child feature set
-// (cycle rejection, relationship views) remains Slice 4's concern.
+// Reparenting is deliberately not exposed here: the parent link is set once at
+// creation (CreateChildIssue). Cycle-safe reparenting is Slice 4's concern.
 type IssueUpdate struct {
 	Type     *domain.IssueType
 	Status   *domain.Status
 	Priority *domain.Priority
 	Owner    *string
-	ParentID *string
 }
 
 // UpdateIssue applies the requested field changes, appends a ledger entry per
@@ -112,15 +126,6 @@ func (s *Service) UpdateIssue(id string, upd IssueUpdate) (domain.Issue, error) 
 			old := issue.Owner
 			issue.Owner = *upd.Owner
 			record(domain.LedgerUpdated, "owner", old, issue.Owner)
-		}
-		if upd.ParentID != nil && (issue.ParentID == nil || *issue.ParentID != *upd.ParentID) {
-			var old string
-			if issue.ParentID != nil {
-				old = *issue.ParentID
-			}
-			p := *upd.ParentID
-			issue.ParentID = &p
-			record(domain.LedgerUpdated, "parent_id", old, p)
 		}
 
 		if len(entries) == 0 {

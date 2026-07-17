@@ -32,6 +32,20 @@ func (c *Client) CreateIssue(ctx context.Context, subject, body string) (IssueRe
 	return c.doIssue(req, http.StatusCreated)
 }
 
+// CreateChildIssue creates an issue whose parent_id is set to parentID, in a
+// single request so the issue and its parent link are persisted atomically.
+func (c *Client) CreateChildIssue(ctx context.Context, subject, body, parentID string) (IssueResult, error) {
+	payload, err := json.Marshal(map[string]string{"subject": subject, "body": body, "parent_id": parentID})
+	if err != nil {
+		return IssueResult{}, err
+	}
+	req, err := c.newRequest(ctx, http.MethodPost, "/issues", bytes.NewReader(payload))
+	if err != nil {
+		return IssueResult{}, err
+	}
+	return c.doIssue(req, http.StatusCreated)
+}
+
 // GetIssue fetches an issue by id via the daemon.
 func (c *Client) GetIssue(ctx context.Context, id string) (IssueResult, error) {
 	req, err := c.newRequest(ctx, http.MethodGet, "/issues/"+url.PathEscape(id), nil)

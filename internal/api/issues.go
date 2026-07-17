@@ -24,8 +24,9 @@ func decodeBody(r *http.Request, dst any) error {
 }
 
 type createIssueRequest struct {
-	Subject string `json:"subject"`
-	Body    string `json:"body"`
+	Subject  string  `json:"subject"`
+	Body     string  `json:"body"`
+	ParentID *string `json:"parent_id"`
 }
 
 func (s *Server) createIssue(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +35,17 @@ func (s *Server) createIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	issue, err := s.svc.CreateIssue(req.Subject, req.Body)
+	var issue domain.Issue
+	var err error
+	if req.ParentID != nil && *req.ParentID != "" {
+		issue, err = s.svc.CreateChildIssue(req.Subject, req.Body, *req.ParentID)
+		if errors.Is(err, domain.ErrNotFound) {
+			writeError(w, http.StatusBadRequest, "parent issue not found")
+			return
+		}
+	} else {
+		issue, err = s.svc.CreateIssue(req.Subject, req.Body)
+	}
 	if errors.Is(err, domain.ErrInvalidIssue) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -82,7 +93,6 @@ type updateIssueRequest struct {
 	Status   *domain.Status    `json:"status"`
 	Priority *domain.Priority  `json:"priority"`
 	Owner    *string           `json:"owner"`
-	ParentID *string           `json:"parent_id"`
 }
 
 func (s *Server) updateIssue(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +106,6 @@ func (s *Server) updateIssue(w http.ResponseWriter, r *http.Request) {
 		Status:   req.Status,
 		Priority: req.Priority,
 		Owner:    req.Owner,
-		ParentID: req.ParentID,
 	})
 	if errors.Is(err, domain.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "issue not found")
