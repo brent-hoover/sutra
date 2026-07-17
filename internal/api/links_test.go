@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -72,7 +73,7 @@ func TestLinkAndLabelStatusCodes(t *testing.T) {
 		{"add label ok", http.MethodPost, "/issues/" + a + "/labels", `{"label":"backend"}`, http.StatusOK},
 		{"empty label rejected", http.MethodPost, "/issues/" + a + "/labels", `{"label":""}`, http.StatusBadRequest},
 		{"label missing issue", http.MethodPost, "/issues/nope/labels", `{"label":"x"}`, http.StatusNotFound},
-		{"remove label ok", http.MethodDelete, "/issues/" + a + "/labels/backend", "", http.StatusOK},
+		{"remove label ok", http.MethodDelete, "/issues/" + a + "/labels?label=backend", "", http.StatusOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,6 +138,44 @@ func TestGetIssueEmptyCollectionsAreArrays(t *testing.T) {
 	for _, want := range []string{`"related":[]`, `"blocked_by":[]`, `"is_blocking":[]`, `"comments":[]`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("view body missing %s:\n%s", want, body)
+		}
+	}
+}
+
+// A free-text label like "." must survive add + remove — it travels as a query
+// parameter, not a path segment (path canonicalization would strip ".").
+func TestDotSegmentLabelRoundTrip(t *testing.T) {
+	srv := newTestServer(t)
+	id := createIssue(t, srv, "dot label host")
+
+	resp, err := http.Post(srv.URL+"/issues/"+id+"/labels", "application/json", strings.NewReader(`{"label":"."}`))
+	if err != nil {
+		t.Fatalf("add label: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("add '.' label status = %d, want 200", resp.StatusCode)
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, srv.URL+"/issues/"+id+"/labels?label="+url.QueryEscape("."), nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("remove label: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("remove '.' label status = %d, want 200", resp.StatusCode)
+	}
+	var view domain.IssueView
+	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, l := range view.Labels {
+		if l == "." {
+			t.Errorf("label '.' still present after removal")
 		}
 	}
 }

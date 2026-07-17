@@ -50,7 +50,14 @@ func (m *Model) listView() string {
 		b.WriteString(styles.dim.Render("(no issues) — press n to create one"))
 		b.WriteByte('\n')
 	}
-	for i, is := range m.issues {
+	// Render a height-bounded window around the cursor so the selected row stays
+	// on screen on a short terminal.
+	start, end := m.listWindow()
+	if start > 0 {
+		b.WriteString(styles.dim.Render(fmt.Sprintf("  ↑ %d more\n", start)))
+	}
+	for i := start; i < end; i++ {
+		is := m.issues[i]
 		cursor := "  "
 		line := fmt.Sprintf("%s\t[%s/%s/%s]\t%s", cleanLine(is.ID), is.Type, is.Status, is.Priority, cleanLine(is.Subject))
 		if is.ParentID != nil {
@@ -62,8 +69,40 @@ func (m *Model) listView() string {
 		}
 		b.WriteString(cursor + line + "\n")
 	}
+	if end < len(m.issues) {
+		b.WriteString(styles.dim.Render(fmt.Sprintf("  ↓ %d more\n", len(m.issues)-end)))
+	}
 	b.WriteString(m.footer("↑/↓ move · enter open · n new · c child · e edit · r refresh · q quit"))
 	return b.String()
+}
+
+// listWindow returns the [start,end) range of issues to render so the cursor is
+// always visible within the terminal height. With no known height (e.g. before
+// the first WindowSizeMsg), it renders the whole list.
+func (m *Model) listWindow() (start, end int) {
+	n := len(m.issues)
+	// Reserve rows for the title, the footer (help + optional status/error), and
+	// the up/down "more" indicators.
+	rows := m.height - 5
+	if m.height <= 0 || rows >= n {
+		return 0, n
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	start = m.cursor - rows/2
+	if start < 0 {
+		start = 0
+	}
+	end = start + rows
+	if end > n {
+		end = n
+		start = end - rows
+	}
+	if start < 0 {
+		start = 0
+	}
+	return start, end
 }
 
 // footer renders the status/error line plus a help hint.

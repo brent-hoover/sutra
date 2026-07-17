@@ -19,6 +19,13 @@ func (s *Server) addLabel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) removeLabel(w http.ResponseWriter, r *http.Request) {
-	issue, err := s.svc.RemoveLabel(r.PathValue("id"), r.PathValue("label"))
+	// Label is a query parameter, not a path segment: free-text labels like "."
+	// or ".." are stripped by URL path canonicalization before routing.
+	label := r.URL.Query().Get("label")
+	if label == "" {
+		writeError(w, http.StatusBadRequest, "label query parameter is required")
+		return
+	}
+	issue, err := s.svc.RemoveLabel(r.PathValue("id"), label)
 	writeLinkResult(w, issue, err)
 }

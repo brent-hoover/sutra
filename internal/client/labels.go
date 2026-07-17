@@ -21,9 +21,11 @@ func (c *Client) AddLabel(ctx context.Context, issueID, label string) (IssueResu
 	return c.doIssue(req, http.StatusOK)
 }
 
-// RemoveLabel removes a label from an issue via the daemon.
+// RemoveLabel removes a label from an issue via the daemon. The label travels
+// as a query parameter so free-text values like "." or ".." survive routing.
 func (c *Client) RemoveLabel(ctx context.Context, issueID, label string) (IssueResult, error) {
-	req, err := c.newRequest(ctx, http.MethodDelete, "/issues/"+url.PathEscape(issueID)+"/labels/"+url.PathEscape(label), nil)
+	q := url.Values{"label": {label}}
+	req, err := c.newRequest(ctx, http.MethodDelete, "/issues/"+url.PathEscape(issueID)+"/labels?"+q.Encode(), nil)
 	if err != nil {
 		return IssueResult{}, err
 	}
