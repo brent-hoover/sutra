@@ -44,37 +44,22 @@ func (s *Service) GetIssue(id string) (domain.Issue, error) {
 }
 
 // GetIssueView returns the full read projection of an issue: its fields and
-// labels plus its related/blocking links and comments. Returns ErrNotFound if
-// the issue does not exist. The link and comment slices are always non-nil so
-// the JSON response renders them as arrays.
+// labels plus its related/blocking links and comments, read as one consistent
+// snapshot in the store. Returns ErrNotFound if the issue does not exist. The
+// link and comment slices are always non-nil so the JSON response renders them
+// as arrays.
 func (s *Service) GetIssueView(id string) (domain.IssueView, error) {
-	issue, err := s.store.GetIssue(id)
+	view, err := s.store.GetIssueView(id)
 	if err != nil {
 		return domain.IssueView{}, err
 	}
-	related, err := s.store.RelatedFor(id)
-	if err != nil {
-		return domain.IssueView{}, err
+	view.Related = orEmpty(view.Related)
+	view.BlockedBy = orEmpty(view.BlockedBy)
+	view.IsBlocking = orEmpty(view.IsBlocking)
+	if view.Comments == nil {
+		view.Comments = []domain.Comment{}
 	}
-	blockedBy, err := s.store.BlockedByFor(id)
-	if err != nil {
-		return domain.IssueView{}, err
-	}
-	isBlocking, err := s.store.IsBlockingFor(id)
-	if err != nil {
-		return domain.IssueView{}, err
-	}
-	comments, err := s.store.CommentsFor(id)
-	if err != nil {
-		return domain.IssueView{}, err
-	}
-	return domain.IssueView{
-		Issue:      issue,
-		Related:    orEmpty(related),
-		BlockedBy:  orEmpty(blockedBy),
-		IsBlocking: orEmpty(isBlocking),
-		Comments:   comments,
-	}, nil
+	return view, nil
 }
 
 // orEmpty returns a non-nil slice so JSON renders [] rather than null.

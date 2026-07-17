@@ -41,6 +41,11 @@ func (s *Store) SetParent(childID, parentID string, entry domain.LedgerEntry) (d
 	}
 	defer tx.Rollback()
 
+	if parentID == "" {
+		// Setting a parent references an existing issue; an empty id is not a
+		// valid parent (clearing a parent is not a supported operation).
+		return domain.Issue{}, errors.Join(domain.ErrInvalidIssue, errors.New("parent_id is required"))
+	}
 	if childID == parentID {
 		return domain.Issue{}, errors.Join(domain.ErrInvalidIssue, errors.New("an issue cannot be its own parent"))
 	}
@@ -53,6 +58,13 @@ func (s *Store) SetParent(childID, parentID string, entry domain.LedgerEntry) (d
 	}
 	if err != nil {
 		return domain.Issue{}, fmt.Errorf("lookup child: %w", err)
+	}
+	if oldParent.Valid && oldParent.String == parentID {
+		// Parent unchanged: idempotent no-op — no updated_at bump, no ledger entry,
+		// matching the relation/block/label operations. Release the connection
+		// (held by this tx) before reading the issue back.
+		_ = tx.Rollback()
+		return s.GetIssue(childID)
 	}
 
 	// Walk up from the proposed parent: if the chain reaches the child, the link
@@ -176,29 +188,75 @@ func (s *Store) AddBlock(blockerID, blockedID string, entry domain.LedgerEntry) 
 	return tx.Commit()
 }
 
+// Link queries; shared between the standalone accessors and the transactional
+// view read so both stay in sync.
+const (
+	relatedQuery = `SELECT related_issue_id FROM issue_relation WHERE issue_id = ?
+	 UNION
+	 SELECT issue_id FROM issue_relation WHERE related_issue_id = ?
+	 ORDER BY 1`
+	blockedByQuery  = `SELECT blocker_id FROM issue_block WHERE blocked_id = ? ORDER BY 1`
+	isBlockingQuery = `SELECT blocked_id FROM issue_block WHERE blocker_id = ? ORDER BY 1`
+)
+
 // RelatedFor returns the ids related to an issue (both directions), sorted.
 func (s *Store) RelatedFor(issueID string) ([]string, error) {
-	return s.queryIDs(
-		`SELECT related_issue_id FROM issue_relation WHERE issue_id = ?
-		 UNION
-		 SELECT issue_id FROM issue_relation WHERE related_issue_id = ?
-		 ORDER BY 1`, issueID, issueID)
+	return idsFor(s.db, relatedQuery, issueID, issueID)
 }
 
 // BlockedByFor returns the ids of issues blocking this one (incoming edges).
 func (s *Store) BlockedByFor(issueID string) ([]string, error) {
-	return s.queryIDs(
-		`SELECT blocker_id FROM issue_block WHERE blocked_id = ? ORDER BY 1`, issueID)
+	return idsFor(s.db, blockedByQuery, issueID)
 }
 
 // IsBlockingFor returns the ids of issues this one blocks (outgoing edges).
 func (s *Store) IsBlockingFor(issueID string) ([]string, error) {
-	return s.queryIDs(
-		`SELECT blocked_id FROM issue_block WHERE blocker_id = ? ORDER BY 1`, issueID)
+	return idsFor(s.db, isBlockingQuery, issueID)
 }
 
-func (s *Store) queryIDs(query string, args ...any) ([]string, error) {
-	rows, err := s.db.Query(query, args...)
+// GetIssueView reads an issue and its derived labels, related/blocking links,
+// and comments within a single transaction, so the projection is a consistent
+// snapshot even under concurrent mutations. Returns ErrNotFound if the issue
+// does not exist.
+func (s *Store) GetIssueView(id string) (domain.IssueView, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.IssueView{}, err
+	}
+	defer tx.Rollback()
+
+	issue, err := scanIssue(tx.QueryRow(`SELECT `+issueColumns+` FROM issues WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.IssueView{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.IssueView{}, fmt.Errorf("get issue: %w", err)
+	}
+	view := domain.IssueView{Issue: issue}
+	if view.Issue.Labels, err = labelsFor(tx, id); err != nil {
+		return domain.IssueView{}, err
+	}
+	if view.Related, err = idsFor(tx, relatedQuery, id, id); err != nil {
+		return domain.IssueView{}, err
+	}
+	if view.BlockedBy, err = idsFor(tx, blockedByQuery, id); err != nil {
+		return domain.IssueView{}, err
+	}
+	if view.IsBlocking, err = idsFor(tx, isBlockingQuery, id); err != nil {
+		return domain.IssueView{}, err
+	}
+	if view.Comments, err = commentsFor(tx, id); err != nil {
+		return domain.IssueView{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.IssueView{}, err
+	}
+	return view, nil
+}
+
+// idsFor runs an id-list query through the given querier (db or tx).
+func idsFor(q querier, query string, args ...any) ([]string, error) {
+	rows, err := q.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query ids: %w", err)
 	}

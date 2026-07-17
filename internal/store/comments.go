@@ -41,7 +41,12 @@ func (s *Store) CreateComment(c domain.Comment, ledger []domain.LedgerEntry) err
 
 // CommentsFor returns an issue's comments in chronological order.
 func (s *Store) CommentsFor(issueID string) ([]domain.Comment, error) {
-	rows, err := s.db.Query(
+	return commentsFor(s.db, issueID)
+}
+
+// commentsFor reads an issue's comments through the given querier (db or tx).
+func commentsFor(q querier, issueID string) ([]domain.Comment, error) {
+	rows, err := q.Query(
 		`SELECT id, issue_id, author, body, created_at
 		 FROM comments WHERE issue_id = ? ORDER BY created_at, id`, issueID)
 	if err != nil {

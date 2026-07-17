@@ -14,6 +14,14 @@ type Store struct {
 	db *sql.DB
 }
 
+// querier is satisfied by both *sql.DB and *sql.Tx, letting a read helper run
+// either standalone or inside a caller's transaction (for a consistent
+// snapshot across several queries).
+type querier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // Open opens (creating if needed) the SQLite database at path and applies
 // the schema migrations.
 func Open(path string) (*Store, error) {

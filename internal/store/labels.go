@@ -24,7 +24,12 @@ CREATE TABLE IF NOT EXISTS issue_label (
 
 // LabelsForIssue returns an issue's labels in alphabetical order.
 func (s *Store) LabelsForIssue(issueID string) ([]string, error) {
-	rows, err := s.db.Query(`SELECT label FROM issue_label WHERE issue_id = ? ORDER BY label`, issueID)
+	return labelsFor(s.db, issueID)
+}
+
+// labelsFor reads an issue's labels through the given querier (db or tx).
+func labelsFor(q querier, issueID string) ([]string, error) {
+	rows, err := q.Query(`SELECT label FROM issue_label WHERE issue_id = ? ORDER BY label`, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("query labels: %w", err)
 	}

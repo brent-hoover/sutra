@@ -120,3 +120,23 @@ func TestGetIssueReturnsFullView(t *testing.T) {
 		t.Errorf("comments = %v, want one comment 'a note'", view.Comments)
 	}
 }
+
+// An issue with no links or comments still renders those fields as JSON arrays
+// (never null), per the view contract.
+func TestGetIssueEmptyCollectionsAreArrays(t *testing.T) {
+	srv := newTestServer(t)
+	a := createIssue(t, srv, "Bare")
+
+	resp := do(t, http.MethodGet, srv.URL+"/issues/"+a, "")
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	body := string(raw)
+	for _, want := range []string{`"related":[]`, `"blocked_by":[]`, `"is_blocking":[]`, `"comments":[]`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("view body missing %s:\n%s", want, body)
+		}
+	}
+}

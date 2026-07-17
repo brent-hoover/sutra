@@ -90,6 +90,35 @@ func TestSetParentRejectsSelfAndCycles(t *testing.T) {
 	}
 }
 
+// Re-setting the same parent is an idempotent no-op (no second ledger entry, no
+// updated_at bump), and an empty parent id is rejected.
+func TestSetParentIdempotentAndEmptyRejected(t *testing.T) {
+	svc := newService(t, t.TempDir())
+	parent := mkIssue(t, svc, "Parent")
+	child := mkIssue(t, svc, "Child")
+
+	if _, err := svc.SetParent(child.ID, parent.ID); err != nil {
+		t.Fatalf("set parent: %v", err)
+	}
+	t1 := issueUpdatedAt(t, svc, child.ID)
+
+	// Repeat the same parent: nothing should change.
+	if _, err := svc.SetParent(child.ID, parent.ID); err != nil {
+		t.Fatalf("re-set parent: %v", err)
+	}
+	if got := issueUpdatedAt(t, svc, child.ID); !got.Equal(t1) {
+		t.Errorf("re-set parent advanced updated_at: %s != %s", got, t1)
+	}
+	if n := countLedger(t, svc, child.ID, domain.LedgerLinked); n != 1 {
+		t.Errorf("linked ledger entries after re-set = %d, want 1 (idempotent)", n)
+	}
+
+	// Empty parent id is invalid.
+	if _, err := svc.SetParent(child.ID, ""); !errors.Is(err, domain.ErrInvalidIssue) {
+		t.Errorf("empty parent: err = %v, want ErrInvalidIssue", err)
+	}
+}
+
 func TestSetParentMissingIssue(t *testing.T) {
 	svc := newService(t, t.TempDir())
 	a := mkIssue(t, svc, "A")
