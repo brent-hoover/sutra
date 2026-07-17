@@ -22,19 +22,13 @@ func Open(path string) (*Store, error) {
 	// daemon's authentication. Secure the directory and file *before* SQLite
 	// opens them; MkdirAll does not tighten an already-existing directory, so
 	// chmod it explicitly.
+	// MkdirAll creates new directories as 0700 (no group/other bits) and leaves
+	// an existing directory's permissions untouched — so a pre-existing shared
+	// directory the user chose is respected. The DB file and its sidecars are
+	// 0600 below, so data stays private regardless of the directory's mode.
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		_, statErr := os.Stat(dir)
-		created := os.IsNotExist(statErr)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("create db dir: %w", err)
-		}
-		// Only tighten a directory we created — never strip permissions from a
-		// pre-existing shared/project directory the user chose. The DB file and
-		// its sidecars are 0600 below, so data stays private regardless.
-		if created {
-			if err := os.Chmod(dir, 0o700); err != nil {
-				return nil, fmt.Errorf("secure db dir: %w", err)
-			}
 		}
 	}
 	// Create (or open) the main file owner-only before SQLite touches it.
