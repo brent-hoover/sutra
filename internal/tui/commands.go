@@ -15,6 +15,15 @@ import (
 // if gen no longer matches the current generation — i.e. the user has navigated
 // since — so a late response cannot overwrite the current screen or clobber a
 // newer request.
+//
+// ACCEPTED LIMITATION (out of scope for Slice 8): create and comment
+// submissions are not end-to-end idempotent. If the daemon commits but the
+// response is lost or times out, the model surfaces an error and a retry can
+// create a duplicate. True idempotency requires a per-submission key that the
+// server deduplicates against a persisted store — a cross-cutting reliability
+// feature (client + api + service + store schema) that belongs with the
+// networking/LAN track (Slice 2), not the TUI. Documented rather than
+// half-implemented client-side, which would not actually deduplicate.
 
 type issuesLoadedMsg struct {
 	gen    int

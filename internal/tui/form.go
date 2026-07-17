@@ -199,7 +199,10 @@ func (m *Model) formView() string {
 			name = styles.active.Render("> " + f.label + ":")
 		}
 		shown := cleanLine(f.value)
-		if f.value == "" && f.placeholder != "" {
+		// Show the placeholder (current value) only while the field is
+		// untouched; once edited, render exactly what will be submitted — even
+		// an intentionally emptied field — so the display never contradicts it.
+		if f.value == "" && !f.edited && f.placeholder != "" {
 			shown = styles.dim.Render(cleanLine(f.placeholder))
 		}
 		b.WriteString(name + " " + shown + "\n")
