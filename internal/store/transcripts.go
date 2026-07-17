@@ -135,7 +135,7 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 // GetTranscript returns the transcript with the given id and its messages in
 // seq order, or ErrNotFound.
 func (s *Store) GetTranscript(id string) (domain.Transcript, error) {
-	t, err := s.scanTranscript(s.db.QueryRow(
+	t, err := scanTranscript(s.db.QueryRow(
 		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at
 		 FROM transcripts WHERE id = ?`, id))
 	if err != nil {
@@ -224,7 +224,7 @@ func (s *Store) TranscriptsForIssue(issueID string) ([]domain.Transcript, error)
 
 	var out []domain.Transcript
 	for rows.Next() {
-		t, err := s.scanTranscript(rows)
+		t, err := scanTranscript(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -252,7 +252,7 @@ func (s *Store) IngestedSessionIDs() (map[string]bool, error) {
 	return set, rows.Err()
 }
 
-func (s *Store) scanTranscript(row rowScanner) (domain.Transcript, error) {
+func scanTranscript(row rowScanner) (domain.Transcript, error) {
 	var (
 		t                     domain.Transcript
 		issueID               sql.NullString
@@ -285,26 +285,5 @@ func (s *Store) messagesFor(transcriptID string) ([]domain.Message, error) {
 		return nil, fmt.Errorf("query messages: %w", err)
 	}
 	defer rows.Close()
-
-	var out []domain.Message
-	for rows.Next() {
-		var (
-			m    domain.Message
-			role string
-			at   sql.NullString
-		)
-		if err := rows.Scan(&m.ID, &m.TranscriptID, &m.Seq, &role, &m.Text, &m.Raw, &at); err != nil {
-			return nil, fmt.Errorf("scan message: %w", err)
-		}
-		m.Role = domain.Role(role)
-		if at.Valid {
-			ts, err := time.Parse(timeFmt, at.String)
-			if err != nil {
-				return nil, fmt.Errorf("parse message at: %w", err)
-			}
-			m.At = &ts
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
+	return scanMessages(rows)
 }

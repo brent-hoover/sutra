@@ -64,6 +64,15 @@ type world struct {
 	docOut     string
 	attached   []domain.Document // documents attached in the current scenario
 
+	// Search scenario state (slice 7).
+	searchTerm    string
+	searchResults domain.SearchResults
+	srchIssueID   string
+	srchDocID     string
+	srchLiveIssue string
+	srchDelIssue  string
+	srchMsgSeq    int
+
 	// Linking & labels state (slice 4).
 	linkA       domain.Issue
 	linkB       domain.Issue
@@ -296,6 +305,31 @@ func (w *world) attachDoc(issueID, kind, title, content string) {
 			w.attached = append(w.attached, w.doc)
 		}
 	}
+}
+
+// ingestLines writes a session file with the given lines under the projects
+// dir and ingests it through the real CLI.
+func (w *world) ingestLines(sessionID string, lines []string) error {
+	dir := filepath.Join(w.dir, "projects", "-Users-me-"+sessionID)
+	path, err := writeSession(dir, sessionID, lines)
+	if err != nil {
+		return err
+	}
+	return w.ingest(path)
+}
+
+// search runs the real `search` command with optional flags and decodes the
+// --json result.
+func (w *world) search(term string, flags ...string) (domain.SearchResults, error) {
+	args := append([]string{"search", term}, flags...)
+	args = append(args, "--json")
+	out, err := w.runCLI(args...)
+	if err != nil {
+		return domain.SearchResults{}, err
+	}
+	var res domain.SearchResults
+	err = json.Unmarshal([]byte(strings.TrimSpace(out)), &res)
+	return res, err
 }
 
 // create runs the create command and returns the parsed issue (for scenarios
@@ -831,6 +865,227 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	})
 
 	registerSlice3Steps(sc, w)
+	registerSlice7Steps(sc, w)
+}
+
+// registerSlice7Steps wires the step definitions for the @slice7 scenarios:
+// cross-entity search, soft-delete exclusion, message context, ranking, and
+// scoped search. Each seeds known terms across entities and drives the real
+// `search` command, asserting on the parsed JSON results.
+func registerSlice7Steps(sc *godog.ScenarioContext, w *world) {
+	// Shared When across scenarios 1-4.
+	sc.Step(`^I search for that term$`, func() error {
+		w.searchResults, w.err = w.search(w.searchTerm)
+		return w.err
+	})
+
+	// --- Full-text search across everything ---
+	sc.Step(`^a known term appears in an issue, a document, and a transcript message$`, func() error {
+		w.searchTerm = "flibbertigibbet"
+		iss, err := w.create("cross entity issue", "body mentions "+w.searchTerm+" here")
+		if err != nil {
+			return err
+		}
+		w.srchIssueID = iss.ID
+		// Attach the document to a separate host issue whose own text does NOT
+		// contain the term, so the document hit is a distinct entity from the
+		// issue hit.
+		host, err := w.create("doc host", "an issue to hang a document from")
+		if err != nil {
+			return err
+		}
+		w.attachDoc(host.ID, string(domain.DocDesign), "Design", "design content with "+w.searchTerm+" inside")
+		if w.err != nil {
+			return w.err
+		}
+		w.srchDocID = w.doc.ID
+		return w.ingestLines("cross000-0000-0000-0000-000000000001", []string{
+			`{"type":"user","message":{"role":"user","content":"discussing ` + w.searchTerm + ` in chat"},"timestamp":"2026-07-16T10:00:00Z"}`,
+		})
+	})
+	sc.Step(`^hits from the issue, the document, and the message all appear$`, func() error {
+		if w.err != nil {
+			return w.err
+		}
+		var foundIssue, foundDoc, foundMsg bool
+		for _, h := range w.searchResults.Hits {
+			switch {
+			case h.Kind == domain.KindIssue && h.Issue != nil && h.Issue.ID == w.srchIssueID:
+				foundIssue = true
+			case h.Kind == domain.KindDocument && h.Document != nil && h.Document.ID == w.srchDocID:
+				foundDoc = true
+			case h.Kind == domain.KindMessage && h.Message != nil && strings.Contains(h.Message.Text, w.searchTerm):
+				foundMsg = true
+			}
+		}
+		if !foundIssue || !foundDoc || !foundMsg {
+			return fmt.Errorf("missing kind: issue=%v doc=%v msg=%v (hits=%d)", foundIssue, foundDoc, foundMsg, len(w.searchResults.Hits))
+		}
+		return nil
+	})
+
+	// --- Soft-deleted content is excluded ---
+	sc.Step(`^a known term appears in a live issue and in a soft-deleted issue$`, func() error {
+		w.searchTerm = "vorpalsword"
+		live, err := w.create("live issue", "body with "+w.searchTerm)
+		if err != nil {
+			return err
+		}
+		w.srchLiveIssue = live.ID
+		del, err := w.create("deleted issue", "body with "+w.searchTerm)
+		if err != nil {
+			return err
+		}
+		w.srchDelIssue = del.ID
+		_, err = w.runCLI("delete", del.ID, "--json")
+		return err
+	})
+	sc.Step(`^the live issue appears and the soft-deleted issue is excluded$`, func() error {
+		if w.err != nil {
+			return w.err
+		}
+		var foundLive, foundDeleted bool
+		for _, h := range w.searchResults.Hits {
+			if h.Kind == domain.KindIssue && h.Issue != nil {
+				if h.Issue.ID == w.srchLiveIssue {
+					foundLive = true
+				}
+				if h.Issue.ID == w.srchDelIssue {
+					foundDeleted = true
+				}
+			}
+		}
+		if !foundLive {
+			return fmt.Errorf("live issue %s missing from results", w.srchLiveIssue)
+		}
+		if foundDeleted {
+			return fmt.Errorf("soft-deleted issue %s must be excluded from search", w.srchDelIssue)
+		}
+		return nil
+	})
+
+	// --- Message hits carry context ---
+	sc.Step(`^a transcript whose middle message contains a known term$`, func() error {
+		w.searchTerm = "jabberwocky"
+		w.srchMsgSeq = 2
+		return w.ingestLines("ctxt0000-0000-0000-0000-000000000001", []string{
+			`{"type":"user","message":{"role":"user","content":"first message"},"timestamp":"2026-07-16T10:00:00Z"}`,
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"second message"}]},"timestamp":"2026-07-16T10:00:01Z"}`,
+			`{"type":"user","message":{"role":"user","content":"the ` + w.searchTerm + ` middle message"},"timestamp":"2026-07-16T10:00:02Z"}`,
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"fourth message"}]},"timestamp":"2026-07-16T10:00:03Z"}`,
+			`{"type":"user","message":{"role":"user","content":"fifth message"},"timestamp":"2026-07-16T10:00:04Z"}`,
+		})
+	})
+	sc.Step(`^the message hit includes its role, text, seq, owning transcript, and adjacent messages$`, func() error {
+		if w.err != nil {
+			return w.err
+		}
+		var hit *domain.SearchHit
+		for i := range w.searchResults.Hits {
+			h := &w.searchResults.Hits[i]
+			if h.Kind == domain.KindMessage && h.Message != nil && strings.Contains(h.Message.Text, w.searchTerm) {
+				hit = h
+				break
+			}
+		}
+		if hit == nil {
+			return fmt.Errorf("no message hit found for term")
+		}
+		if hit.Message.Role == "" {
+			return fmt.Errorf("message hit missing role")
+		}
+		if hit.Message.Seq != w.srchMsgSeq {
+			return fmt.Errorf("message seq = %d, want %d", hit.Message.Seq, w.srchMsgSeq)
+		}
+		if hit.Transcript == nil {
+			return fmt.Errorf("message hit missing owning transcript")
+		}
+		ctxSeqs := map[int]bool{}
+		for _, c := range hit.Context {
+			ctxSeqs[c.Seq] = true
+		}
+		if !ctxSeqs[1] || !ctxSeqs[3] {
+			return fmt.Errorf("context missing adjacent messages, got seqs %v", ctxSeqs)
+		}
+		if ctxSeqs[w.srchMsgSeq] {
+			return fmt.Errorf("context must not include the matching message itself (seq %d)", w.srchMsgSeq)
+		}
+		return nil
+	})
+
+	// --- Ranked results ---
+	sc.Step(`^several matches of differing relevance for a term$`, func() error {
+		w.searchTerm = "brillig"
+		host, err := w.create("ranking host", "issue to host ranking documents")
+		if err != nil {
+			return err
+		}
+		w.attachDoc(host.ID, string(domain.DocProblem), "sparse", "mentions "+w.searchTerm+" once only")
+		if w.err != nil {
+			return w.err
+		}
+		dense := strings.Repeat(w.searchTerm+" ", 8)
+		w.attachDoc(host.ID, string(domain.DocDesign), "dense", dense+"and more context")
+		if w.err != nil {
+			return w.err
+		}
+		w.srchDocID = w.doc.ID // the dense doc — expected to rank first
+		return nil
+	})
+	sc.Step(`^results are ordered by relevance and each hit shows its source kind$`, func() error {
+		if w.err != nil {
+			return w.err
+		}
+		if len(w.searchResults.Hits) < 2 {
+			return fmt.Errorf("expected multiple hits, got %d", len(w.searchResults.Hits))
+		}
+		for i := 1; i < len(w.searchResults.Hits); i++ {
+			if w.searchResults.Hits[i].Rank < w.searchResults.Hits[i-1].Rank {
+				return fmt.Errorf("hits not ordered by rank at index %d: %v < %v",
+					i, w.searchResults.Hits[i].Rank, w.searchResults.Hits[i-1].Rank)
+			}
+		}
+		for _, h := range w.searchResults.Hits {
+			if !h.Kind.Valid() {
+				return fmt.Errorf("hit has invalid source kind %q", h.Kind)
+			}
+		}
+		top := w.searchResults.Hits[0]
+		if top.Kind != domain.KindDocument || top.Document == nil || top.Document.ID != w.srchDocID {
+			return fmt.Errorf("most relevant hit should be the dense document %s", w.srchDocID)
+		}
+		return nil
+	})
+
+	// --- Scoped search ---
+	sc.Step(`^a known term appears in both an issue and a document$`, func() error {
+		w.searchTerm = "slithytove"
+		iss, err := w.create("scoped issue", "body with "+w.searchTerm)
+		if err != nil {
+			return err
+		}
+		w.srchIssueID = iss.ID
+		w.attachDoc(iss.ID, string(domain.DocPlan), "scoped doc", "content with "+w.searchTerm)
+		return w.err
+	})
+	sc.Step(`^I search for that term restricted to kind document$`, func() error {
+		w.searchResults, w.err = w.search(w.searchTerm, "--kind", "document")
+		return w.err
+	})
+	sc.Step(`^only document hits are returned$`, func() error {
+		if w.err != nil {
+			return w.err
+		}
+		if len(w.searchResults.Hits) == 0 {
+			return fmt.Errorf("scoped search returned no hits")
+		}
+		for _, h := range w.searchResults.Hits {
+			if h.Kind != domain.KindDocument {
+				return fmt.Errorf("scoped search returned a %s hit", h.Kind)
+			}
+		}
+		return nil
+	})
 	registerSlice4Steps(sc, w)
 }
 

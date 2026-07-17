@@ -43,6 +43,8 @@ func Handler(svc *service.Service) http.Handler {
 	mux.HandleFunc("POST /issues/{id}/blocks", s.blockIssue)
 	mux.HandleFunc("POST /issues/{id}/labels", s.addLabel)
 	mux.HandleFunc("DELETE /issues/{id}/labels/{label}", s.removeLabel)
+	// Search (slice 7).
+	mux.HandleFunc("GET /search", s.search)
 	return mux
 }
 

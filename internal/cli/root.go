@@ -33,6 +33,7 @@ func NewRoot(cfg config.Config) *cobra.Command {
 		transcriptCmd(cfg),
 		linkCmd(cfg),
 		labelCmd(cfg),
+		searchCmd(cfg),
 	)
 	return root
 }
