@@ -41,6 +41,29 @@ func (c *Client) GetIssue(ctx context.Context, id string) (IssueResult, error) {
 	return c.doIssue(req, http.StatusOK)
 }
 
+// IssueViewResult carries the full decoded issue view and the raw JSON response.
+type IssueViewResult struct {
+	View domain.IssueView
+	Raw  json.RawMessage
+}
+
+// GetIssueView fetches an issue's full view (fields, labels, links, comments).
+func (c *Client) GetIssueView(ctx context.Context, id string) (IssueViewResult, error) {
+	req, err := c.newRequest(ctx, http.MethodGet, "/issues/"+url.PathEscape(id), nil)
+	if err != nil {
+		return IssueViewResult{}, err
+	}
+	raw, err := c.do(req, http.StatusOK)
+	if err != nil {
+		return IssueViewResult{}, err
+	}
+	var view domain.IssueView
+	if err := json.Unmarshal(raw, &view); err != nil {
+		return IssueViewResult{}, err
+	}
+	return IssueViewResult{View: view, Raw: raw}, nil
+}
+
 // IssueListResult carries the decoded issues and the raw JSON response body.
 type IssueListResult struct {
 	Issues []domain.Issue

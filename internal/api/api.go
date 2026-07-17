@@ -37,6 +37,12 @@ func Handler(svc *service.Service) http.Handler {
 	mux.HandleFunc("GET /transcripts", s.discoverTranscripts)
 	mux.HandleFunc("GET /transcripts/{id}", s.getTranscript)
 	mux.HandleFunc("POST /transcripts/{id}/link", s.linkTranscript)
+	// Linking & labels (slice 4).
+	mux.HandleFunc("PUT /issues/{id}/parent", s.setParent)
+	mux.HandleFunc("POST /issues/{id}/relations", s.relateIssue)
+	mux.HandleFunc("POST /issues/{id}/blocks", s.blockIssue)
+	mux.HandleFunc("POST /issues/{id}/labels", s.addLabel)
+	mux.HandleFunc("DELETE /issues/{id}/labels/{label}", s.removeLabel)
 	return mux
 }
 

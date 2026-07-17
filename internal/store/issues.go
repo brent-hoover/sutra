@@ -129,7 +129,8 @@ func scanIssue(sc rowScanner) (domain.Issue, error) {
 	return issue, nil
 }
 
-// GetIssue returns the issue with the given id, or ErrNotFound.
+// GetIssue returns the issue with the given id (with its derived labels), or
+// ErrNotFound.
 func (s *Store) GetIssue(id string) (domain.Issue, error) {
 	issue, err := scanIssue(s.db.QueryRow(`SELECT `+issueColumns+` FROM issues WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -137,6 +138,9 @@ func (s *Store) GetIssue(id string) (domain.Issue, error) {
 	}
 	if err != nil {
 		return domain.Issue{}, fmt.Errorf("get issue: %w", err)
+	}
+	if issue.Labels, err = s.LabelsForIssue(id); err != nil {
+		return domain.Issue{}, err
 	}
 	return issue, nil
 }
@@ -162,6 +166,10 @@ func (s *Store) ListIssues(f domain.IssueFilter) ([]domain.Issue, error) {
 		q += " AND owner = ?"
 		args = append(args, f.Owner)
 	}
+	if f.Label != "" {
+		q += " AND id IN (SELECT issue_id FROM issue_label WHERE label = ?)"
+		args = append(args, f.Label)
+	}
 	q += " ORDER BY created_at, id"
 
 	rows, err := s.db.Query(q, args...)
@@ -178,7 +186,17 @@ func (s *Store) ListIssues(f domain.IssueFilter) ([]domain.Issue, error) {
 		}
 		issues = append(issues, issue)
 	}
-	return issues, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Attach derived labels after the result set is closed (the single-connection
+	// pool won't run a second query while rows is open).
+	for i := range issues {
+		if issues[i].Labels, err = s.LabelsForIssue(issues[i].ID); err != nil {
+			return nil, err
+		}
+	}
+	return issues, nil
 }
 
 // LedgerFor returns an issue's ledger entries in chronological order.

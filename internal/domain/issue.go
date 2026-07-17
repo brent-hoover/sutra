@@ -63,13 +63,13 @@ func (p Priority) Valid() bool {
 }
 
 // IssueFilter narrows a list query. A zero-value field imposes no constraint;
-// filters combine with AND. Labels arrive with the label feature in a later
-// slice and are not applied here yet.
+// filters combine with AND.
 type IssueFilter struct {
 	Status   Status
 	Type     IssueType
 	Priority Priority
 	Owner    string
+	Label    string // free-text label; matches issues carrying it in issue_label
 }
 
 // ErrInvalidIssue is returned when an issue fails validation.
@@ -89,6 +89,20 @@ type Issue struct {
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// IssueView is the full read-only projection of an issue: its own fields and
+// derived labels, plus its related/blocking links and comments. It is what
+// `sutra view <id>` and GET /issues/{id} return. Related, BlockedBy, and
+// IsBlocking are lists of issue ids; BlockedBy is the set of issues blocking
+// this one (incoming issue_block edges) and IsBlocking the set it blocks
+// (outgoing edges).
+type IssueView struct {
+	Issue
+	Related    []string  `json:"related"`
+	BlockedBy  []string  `json:"blocked_by"`
+	IsBlocking []string  `json:"is_blocking"`
+	Comments   []Comment `json:"comments"`
 }
 
 // Validate enforces the invariant that subject and body are non-empty.

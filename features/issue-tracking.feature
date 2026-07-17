@@ -30,6 +30,7 @@ Feature: Issue tracking
     When I view it by id
     Then its core fields are returned
 
+  @slice4
   Scenario: View an issue
     Given an issue with comments, labels, and links
     When I view it by id
@@ -59,6 +60,7 @@ Feature: Issue tracking
     When the change is saved
     Then a LedgerEntry of kind deleted is appended
 
+  @slice4
   Scenario: Link issues
     Given two issues
     When I set one as another's parent_id
@@ -79,6 +81,7 @@ Feature: Issue tracking
     When I relate them
     Then each appears in the other's related list
 
+  @slice4
   Scenario: Label an issue
     Given an issue
     When I add a label

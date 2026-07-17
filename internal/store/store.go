@@ -122,5 +122,11 @@ CREATE INDEX IF NOT EXISTS idx_documents_issue_id ON documents (issue_id);`
 	if err := s.migrateTranscripts(); err != nil {
 		return err
 	}
+	if err := s.migrateLinks(); err != nil {
+		return err
+	}
+	if err := s.migrateLabels(); err != nil {
+		return err
+	}
 	return nil
 }

@@ -63,6 +63,15 @@ type world struct {
 	docContent string
 	docOut     string
 	attached   []domain.Document // documents attached in the current scenario
+
+	// Linking & labels state (slice 4).
+	linkA       domain.Issue
+	linkB       domain.Issue
+	linkC       domain.Issue
+	viewLabel   string
+	viewRelated string
+	viewBlocker string
+	viewComment string
 }
 
 var managedEnvKeys = []string{"SUTRA_LISTEN", "SUTRA_DB", "SUTRA_HOST", "SUTRA_TOKEN", "SUTRA_PROJECTS_DIR"}
@@ -822,6 +831,233 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	})
 
 	registerSlice3Steps(sc, w)
+	registerSlice4Steps(sc, w)
+}
+
+// registerSlice4Steps wires the step definitions for the @slice4 scenarios:
+// linking (parent/related/blocking), labels, and the full issue view.
+func registerSlice4Steps(sc *godog.ScenarioContext, w *world) {
+	// --- Link issues ---
+	sc.Step(`^two issues$`, func() error {
+		var err error
+		if w.linkA, err = w.create("Issue A", "body a"); err != nil {
+			return err
+		}
+		w.linkB, err = w.create("Issue B", "body b")
+		return err
+	})
+	sc.Step(`^I set one as another's parent_id$`, func() error {
+		// Make B a child of A.
+		_, w.err = w.runCLI("link", "parent", w.linkB.ID, "--parent", w.linkA.ID, "--json")
+		return nil
+	})
+	sc.Step(`^the child and parent relation holds$`, func() error {
+		if w.err != nil {
+			return fmt.Errorf("set parent failed: %w", w.err)
+		}
+		child, err := w.verify.GetIssue(w.linkB.ID)
+		if err != nil {
+			return err
+		}
+		if child.ParentID == nil || *child.ParentID != w.linkA.ID {
+			return fmt.Errorf("child parent_id = %v, want %q", child.ParentID, w.linkA.ID)
+		}
+		return nil
+	})
+	sc.Step(`^I set its parent_id to itself$`, func() error {
+		_, w.err = w.runCLI("link", "parent", w.issue.ID, "--parent", w.issue.ID, "--json")
+		return nil
+	})
+	sc.Step(`^issues A and B where B's parent is A$`, func() error {
+		var err error
+		if w.linkA, err = w.create("Issue A", "body a"); err != nil {
+			return err
+		}
+		if w.linkB, err = w.create("Issue B", "body b"); err != nil {
+			return err
+		}
+		_, err = w.runCLI("link", "parent", w.linkB.ID, "--parent", w.linkA.ID, "--json")
+		return err
+	})
+	sc.Step(`^I set A's parent_id to B$`, func() error {
+		_, w.err = w.runCLI("link", "parent", w.linkA.ID, "--parent", w.linkB.ID, "--json")
+		return nil
+	})
+	sc.Step(`^it is rejected as a cycle$`, func() error {
+		if w.err == nil {
+			return fmt.Errorf("expected cycle rejection, got none")
+		}
+		return nil
+	})
+	sc.Step(`^issues A, B, and C forming a parent chain A to B to C$`, func() error {
+		// A is parent of B, B is parent of C (A is the root ancestor).
+		var err error
+		if w.linkA, err = w.create("Issue A", "body a"); err != nil {
+			return err
+		}
+		if w.linkB, err = w.create("Issue B", "body b"); err != nil {
+			return err
+		}
+		if w.linkC, err = w.create("Issue C", "body c"); err != nil {
+			return err
+		}
+		if _, err = w.runCLI("link", "parent", w.linkB.ID, "--parent", w.linkA.ID, "--json"); err != nil {
+			return err
+		}
+		_, err = w.runCLI("link", "parent", w.linkC.ID, "--parent", w.linkB.ID, "--json")
+		return err
+	})
+	sc.Step(`^I set A's parent_id to C$`, func() error {
+		// C is a descendant of A, so making C the parent of A closes a cycle.
+		_, w.err = w.runCLI("link", "parent", w.linkA.ID, "--parent", w.linkC.ID, "--json")
+		return nil
+	})
+	sc.Step(`^I mark A as blocked by B$`, func() error {
+		_, w.err = w.runCLI("link", "blocked", w.linkA.ID, "--by", w.linkB.ID, "--json")
+		return w.err
+	})
+	sc.Step(`^A shows B in blocked_by and B shows A in is_blocking, derived from issue_block$`, func() error {
+		a, err := w.verify.GetIssueView(w.linkA.ID)
+		if err != nil {
+			return err
+		}
+		if !containsStr(a.BlockedBy, w.linkB.ID) {
+			return fmt.Errorf("A.blocked_by = %v, want to contain %q", a.BlockedBy, w.linkB.ID)
+		}
+		b, err := w.verify.GetIssueView(w.linkB.ID)
+		if err != nil {
+			return err
+		}
+		if !containsStr(b.IsBlocking, w.linkA.ID) {
+			return fmt.Errorf("B.is_blocking = %v, want to contain %q", b.IsBlocking, w.linkA.ID)
+		}
+		return nil
+	})
+	sc.Step(`^I relate them$`, func() error {
+		_, w.err = w.runCLI("link", "related", w.linkA.ID, "--to", w.linkB.ID, "--json")
+		return w.err
+	})
+	sc.Step(`^each appears in the other's related list$`, func() error {
+		a, err := w.verify.GetIssueView(w.linkA.ID)
+		if err != nil {
+			return err
+		}
+		if !containsStr(a.Related, w.linkB.ID) {
+			return fmt.Errorf("A.related = %v, want to contain %q", a.Related, w.linkB.ID)
+		}
+		b, err := w.verify.GetIssueView(w.linkB.ID)
+		if err != nil {
+			return err
+		}
+		if !containsStr(b.Related, w.linkA.ID) {
+			return fmt.Errorf("B.related = %v, want to contain %q", b.Related, w.linkA.ID)
+		}
+		return nil
+	})
+
+	// --- Label an issue ---
+	sc.Step(`^I add a label$`, func() error {
+		w.viewLabel = "backend"
+		_, w.err = w.runCLI("label", "add", w.issue.ID, w.viewLabel, "--json")
+		return w.err
+	})
+	sc.Step(`^it appears in labels$`, func() error {
+		iss, err := w.verify.GetIssue(w.issue.ID)
+		if err != nil {
+			return err
+		}
+		if !containsStr(iss.Labels, w.viewLabel) {
+			return fmt.Errorf("labels = %v, want to contain %q", iss.Labels, w.viewLabel)
+		}
+		return nil
+	})
+	sc.Step(`^an issue with a label$`, func() error {
+		w.issue, w.err = w.create("Labelled", "body")
+		if w.err != nil {
+			return w.err
+		}
+		w.viewLabel = "frontend"
+		_, w.err = w.runCLI("label", "add", w.issue.ID, w.viewLabel, "--json")
+		return w.err
+	})
+	sc.Step(`^I remove the label$`, func() error {
+		_, w.err = w.runCLI("label", "remove", w.issue.ID, w.viewLabel, "--json")
+		return w.err
+	})
+	sc.Step(`^it no longer appears in labels$`, func() error {
+		iss, err := w.verify.GetIssue(w.issue.ID)
+		if err != nil {
+			return err
+		}
+		if containsStr(iss.Labels, w.viewLabel) {
+			return fmt.Errorf("labels = %v, still contains removed %q", iss.Labels, w.viewLabel)
+		}
+		return nil
+	})
+
+	// --- View an issue (full) ---
+	sc.Step(`^an issue with comments, labels, and links$`, func() error {
+		w.issue, w.err = w.create("Full view", "the body to read back")
+		if w.err != nil {
+			return w.err
+		}
+		// A comment.
+		w.viewComment = "a considered comment"
+		if _, err := w.runCLI("comment", w.issue.ID, "--body", w.viewComment, "--json"); err != nil {
+			return err
+		}
+		// A label.
+		w.viewLabel = "urgent"
+		if _, err := w.runCLI("label", "add", w.issue.ID, w.viewLabel, "--json"); err != nil {
+			return err
+		}
+		// A related link and a blocking link to two other issues.
+		related, err := w.create("Related issue", "body")
+		if err != nil {
+			return err
+		}
+		w.viewRelated = related.ID
+		if _, err := w.runCLI("link", "related", w.issue.ID, "--to", w.viewRelated, "--json"); err != nil {
+			return err
+		}
+		blocker, err := w.create("Blocker issue", "body")
+		if err != nil {
+			return err
+		}
+		w.viewBlocker = blocker.ID
+		_, err = w.runCLI("link", "blocked", w.issue.ID, "--by", w.viewBlocker, "--json")
+		return err
+	})
+	sc.Step(`^its fields, labels, related and blocking links, and comments are shown$`, func() error {
+		if w.err != nil {
+			return fmt.Errorf("view failed: %w", w.err)
+		}
+		for label, want := range map[string]string{
+			"id":         w.issue.ID,
+			"subject":    w.issue.Subject,
+			"body":       w.issue.Body,
+			"status":     string(w.issue.Status),
+			"label":      w.viewLabel,
+			"related":    w.viewRelated,
+			"blocked_by": w.viewBlocker,
+			"comment":    w.viewComment,
+		} {
+			if !strings.Contains(w.viewOut, want) {
+				return fmt.Errorf("view output missing %s (%q):\n%s", label, want, w.viewOut)
+			}
+		}
+		return nil
+	})
+}
+
+// containsStr reports whether s contains v.
+func containsStr(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 // registerSlice3Steps wires the step definitions for the @slice3 scenarios:

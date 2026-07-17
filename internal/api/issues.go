@@ -66,6 +66,7 @@ func (s *Server) listIssues(w http.ResponseWriter, r *http.Request) {
 		Type:     domain.IssueType(q.Get("type")),
 		Priority: domain.Priority(q.Get("priority")),
 		Owner:    q.Get("owner"),
+		Label:    q.Get("label"), // free-text; no enum validation
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -140,8 +141,11 @@ func (s *Server) issueHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
+// getIssue returns the full issue view: fields and labels plus related/blocking
+// links and comments (story "View an issue"). The response is a superset of the
+// bare Issue, so clients that decode only Issue fields still work.
 func (s *Server) getIssue(w http.ResponseWriter, r *http.Request) {
-	issue, err := s.svc.GetIssue(r.PathValue("id"))
+	view, err := s.svc.GetIssueView(r.PathValue("id"))
 	if errors.Is(err, domain.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "issue not found")
 		return
@@ -150,7 +154,7 @@ func (s *Server) getIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, issue)
+	writeJSON(w, http.StatusOK, view)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

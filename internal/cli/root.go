@@ -31,6 +31,8 @@ func NewRoot(cfg config.Config) *cobra.Command {
 		commentCmd(cfg),
 		docCmd(cfg),
 		transcriptCmd(cfg),
+		linkCmd(cfg),
+		labelCmd(cfg),
 	)
 	return root
 }

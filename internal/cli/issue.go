@@ -35,20 +35,20 @@ func createCmd(cfg config.Config) *cobra.Command {
 func viewCmd(cfg config.Config) *cobra.Command {
 	return &cobra.Command{
 		Use:   "view <id>",
-		Short: "View an issue by id",
+		Short: "View an issue by id (fields, labels, links, comments)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := client.New(cfg).GetIssue(cmd.Context(), args[0])
+			res, err := client.New(cfg).GetIssueView(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
-			return outputDetail(cmd, res)
+			return outputView(cmd, res)
 		},
 	}
 }
 
 func listCmd(cfg config.Config) *cobra.Command {
-	var status, typ, priority, owner string
+	var status, typ, priority, owner, label string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List issues (soft-deleted excluded)",
@@ -58,6 +58,7 @@ func listCmd(cfg config.Config) *cobra.Command {
 				"type":     typ,
 				"priority": priority,
 				"owner":    owner,
+				"label":    label,
 			}
 			res, err := client.New(cfg).ListIssues(cmd.Context(), filters)
 			if err != nil {
@@ -70,6 +71,7 @@ func listCmd(cfg config.Config) *cobra.Command {
 	cmd.Flags().StringVar(&typ, "type", "", "filter by type")
 	cmd.Flags().StringVar(&priority, "priority", "", "filter by priority")
 	cmd.Flags().StringVar(&owner, "owner", "", "filter by owner")
+	cmd.Flags().StringVar(&label, "label", "", "filter by label")
 	return cmd
 }
 
@@ -195,7 +197,7 @@ func output(cmd *cobra.Command, res client.IssueResult) error {
 	return err
 }
 
-// outputDetail prints all core fields including the body (used by view).
+// outputDetail prints all core fields including the body (used by update).
 func outputDetail(cmd *cobra.Command, res client.IssueResult) error {
 	if handled, err := wantJSON(cmd, res); handled {
 		return err
@@ -211,6 +213,53 @@ func outputDetail(cmd *cobra.Command, res client.IssueResult) error {
 		fmt.Fprintf(&b, "owner:    %s\n", i.Owner)
 	}
 	fmt.Fprintf(&b, "\n%s\n", i.Body)
+	_, err := io.WriteString(cmd.OutOrStdout(), b.String())
+	return err
+}
+
+// outputView prints the full issue view — core fields, labels, links, and
+// comments — used by `view`. With --json it prints the raw API response.
+func outputView(cmd *cobra.Command, res client.IssueViewResult) error {
+	if jsonRequested(cmd) {
+		return printRaw(cmd, res.Raw)
+	}
+	v := res.View
+	i := v.Issue
+	var b strings.Builder
+	fmt.Fprintf(&b, "id:       %s\n", i.ID)
+	fmt.Fprintf(&b, "subject:  %s\n", i.Subject)
+	fmt.Fprintf(&b, "type:     %s\n", i.Type)
+	fmt.Fprintf(&b, "status:   %s\n", i.Status)
+	fmt.Fprintf(&b, "priority: %s\n", i.Priority)
+	if i.Owner != "" {
+		fmt.Fprintf(&b, "owner:    %s\n", i.Owner)
+	}
+	if i.ParentID != nil && *i.ParentID != "" {
+		fmt.Fprintf(&b, "parent:   %s\n", *i.ParentID)
+	}
+	if len(i.Labels) > 0 {
+		fmt.Fprintf(&b, "labels:   %s\n", strings.Join(i.Labels, ", "))
+	}
+	if len(v.Related) > 0 {
+		fmt.Fprintf(&b, "related:  %s\n", strings.Join(v.Related, ", "))
+	}
+	if len(v.BlockedBy) > 0 {
+		fmt.Fprintf(&b, "blocked_by:  %s\n", strings.Join(v.BlockedBy, ", "))
+	}
+	if len(v.IsBlocking) > 0 {
+		fmt.Fprintf(&b, "is_blocking: %s\n", strings.Join(v.IsBlocking, ", "))
+	}
+	fmt.Fprintf(&b, "\n%s\n", i.Body)
+	if len(v.Comments) > 0 {
+		b.WriteString("\ncomments:\n")
+		for _, c := range v.Comments {
+			author := c.Author
+			if author == "" {
+				author = "-"
+			}
+			fmt.Fprintf(&b, "  [%s] %s: %s\n", c.CreatedAt.Format(time.RFC3339), author, c.Body)
+		}
+	}
 	_, err := io.WriteString(cmd.OutOrStdout(), b.String())
 	return err
 }

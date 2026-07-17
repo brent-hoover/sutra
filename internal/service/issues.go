@@ -38,9 +38,51 @@ func (s *Service) CreateIssue(subject, body string) (domain.Issue, error) {
 	return issue, nil
 }
 
-// GetIssue returns the issue with the given id.
+// GetIssue returns the issue with the given id (with its derived labels).
 func (s *Service) GetIssue(id string) (domain.Issue, error) {
 	return s.store.GetIssue(id)
+}
+
+// GetIssueView returns the full read projection of an issue: its fields and
+// labels plus its related/blocking links and comments. Returns ErrNotFound if
+// the issue does not exist. The link and comment slices are always non-nil so
+// the JSON response renders them as arrays.
+func (s *Service) GetIssueView(id string) (domain.IssueView, error) {
+	issue, err := s.store.GetIssue(id)
+	if err != nil {
+		return domain.IssueView{}, err
+	}
+	related, err := s.store.RelatedFor(id)
+	if err != nil {
+		return domain.IssueView{}, err
+	}
+	blockedBy, err := s.store.BlockedByFor(id)
+	if err != nil {
+		return domain.IssueView{}, err
+	}
+	isBlocking, err := s.store.IsBlockingFor(id)
+	if err != nil {
+		return domain.IssueView{}, err
+	}
+	comments, err := s.store.CommentsFor(id)
+	if err != nil {
+		return domain.IssueView{}, err
+	}
+	return domain.IssueView{
+		Issue:      issue,
+		Related:    orEmpty(related),
+		BlockedBy:  orEmpty(blockedBy),
+		IsBlocking: orEmpty(isBlocking),
+		Comments:   comments,
+	}, nil
+}
+
+// orEmpty returns a non-nil slice so JSON renders [] rather than null.
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // ListIssues returns live issues matching the filter (soft-deleted excluded).
