@@ -30,6 +30,7 @@ func NewRoot(cfg config.Config) *cobra.Command {
 		historyCmd(cfg),
 		commentCmd(cfg),
 		docCmd(cfg),
+		transcriptCmd(cfg),
 	)
 	return root
 }

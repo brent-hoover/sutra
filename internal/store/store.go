@@ -117,5 +117,10 @@ CREATE INDEX IF NOT EXISTS idx_documents_issue_id ON documents (issue_id);`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	// Per-feature migrations append here (see docs/PLAN.md "thin registration
+	// points"). Keep this list short and each migration in its own file.
+	if err := s.migrateTranscripts(); err != nil {
+		return err
+	}
 	return nil
 }
