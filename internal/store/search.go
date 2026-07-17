@@ -81,35 +81,36 @@ END;`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate search: %w", err)
 	}
-	return s.backfillSearch()
+	return s.reconcileSearch()
 }
 
-// backfillSearch populates the index from rows written before the triggers
-// existed (e.g. a DB created by an earlier version). It runs in one transaction
-// and only when the index is empty, so it is atomic — a mid-backfill failure
-// rolls back entirely and is retried on the next open, never leaving some entity
-// kinds permanently unindexed — and never duplicates trigger-maintained rows.
-func (s *Store) backfillSearch() error {
+// reconcileSearch indexes any source row not already present in the FTS index —
+// content written before the triggers existed (an older DB), or rows missed if a
+// prior migration was interrupted. It runs on every open, in one transaction,
+// and is idempotent: the per-row NOT EXISTS guard means already-indexed rows
+// (by triggers or a prior reconcile) are never duplicated. This reconciles index
+// completeness rather than gating on emptiness, so a trigger-maintained write
+// after an interrupted migration can never leave historical rows unindexed.
+func (s *Store) reconcileSearch() error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	var n int
-	if err := tx.QueryRow(`SELECT count(*) FROM search_fts`).Scan(&n); err != nil {
-		return fmt.Errorf("count search index: %w", err)
-	}
-	if n > 0 {
-		return nil
-	}
 	for _, stmt := range []string{
-		`INSERT INTO search_fts(kind, ref_id, text) SELECT 'issue', id, subject || ' ' || body FROM issues`,
-		`INSERT INTO search_fts(kind, ref_id, text) SELECT 'document', id, content FROM documents`,
-		`INSERT INTO search_fts(kind, ref_id, text) SELECT 'message', id, text FROM messages`,
+		`INSERT INTO search_fts(kind, ref_id, text)
+		 SELECT 'issue', id, subject || ' ' || body FROM issues
+		 WHERE NOT EXISTS (SELECT 1 FROM search_fts f WHERE f.kind = 'issue' AND f.ref_id = issues.id)`,
+		`INSERT INTO search_fts(kind, ref_id, text)
+		 SELECT 'document', id, content FROM documents
+		 WHERE NOT EXISTS (SELECT 1 FROM search_fts f WHERE f.kind = 'document' AND f.ref_id = documents.id)`,
+		`INSERT INTO search_fts(kind, ref_id, text)
+		 SELECT 'message', id, text FROM messages
+		 WHERE NOT EXISTS (SELECT 1 FROM search_fts f WHERE f.kind = 'message' AND f.ref_id = messages.id)`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
-			return fmt.Errorf("backfill search index: %w", err)
+			return fmt.Errorf("reconcile search index: %w", err)
 		}
 	}
 	return tx.Commit()

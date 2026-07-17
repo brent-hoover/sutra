@@ -28,7 +28,9 @@ func (c *Client) Search(ctx context.Context, text, kind, issue string, limit int
 	if issue != "" {
 		q.Set("issue", issue)
 	}
-	if limit > 0 {
+	// Send any non-zero limit through (0 = default). Negative values are sent so
+	// the daemon returns its validation error rather than being silently ignored.
+	if limit != 0 {
 		q.Set("limit", strconv.Itoa(limit))
 	}
 	req, err := c.newRequest(ctx, http.MethodGet, "/search?"+q.Encode(), nil)

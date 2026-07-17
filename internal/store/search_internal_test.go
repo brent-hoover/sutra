@@ -57,7 +57,7 @@ func TestBackfillSearch(t *testing.T) {
 	}
 
 	// Backfill (as migrate would on the next open) must re-index all three kinds.
-	if err := s.backfillSearch(); err != nil {
+	if err := s.reconcileSearch(); err != nil {
 		t.Fatalf("backfill: %v", err)
 	}
 	hits, err := s.Search(domain.SearchQuery{Text: term})
@@ -72,12 +72,12 @@ func TestBackfillSearch(t *testing.T) {
 		t.Fatalf("backfill did not re-index all kinds, got %v", counts)
 	}
 
-	// A second backfill is a no-op (index non-empty) — no duplicates.
-	if err := s.backfillSearch(); err != nil {
-		t.Fatalf("second backfill: %v", err)
+	// A second reconcile is a no-op (index non-empty) — no duplicates.
+	if err := s.reconcileSearch(); err != nil {
+		t.Fatalf("second reconcile: %v", err)
 	}
 	if hits, err := s.Search(domain.SearchQuery{Text: term}); err != nil {
-		t.Fatalf("search (after second backfill): %v", err)
+		t.Fatalf("search (after second reconcile): %v", err)
 	} else if len(hits) != 3 {
 		t.Fatalf("expected 3 hits after idempotent backfill, got %d", len(hits))
 	}

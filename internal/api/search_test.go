@@ -55,6 +55,12 @@ func TestSearchAPIValidation(t *testing.T) {
 	if got, _ := searchStatus(t, srv, url.Values{"q": {"x"}, "kind": {"bogus"}}); got != http.StatusBadRequest {
 		t.Errorf("invalid kind status = %d, want 400", got)
 	}
+	if got, _ := searchStatus(t, srv, url.Values{"q": {"x"}, "limit": {"-1"}}); got != http.StatusBadRequest {
+		t.Errorf("negative limit status = %d, want 400", got)
+	}
+	if got, _ := searchStatus(t, srv, url.Values{"q": {"x"}, "limit": {"notanint"}}); got != http.StatusBadRequest {
+		t.Errorf("non-integer limit status = %d, want 400", got)
+	}
 }
 
 // TestSearchAPIHappyPath: a valid query returns 200 and a structured result.
