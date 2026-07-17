@@ -87,10 +87,11 @@ func authMiddleware(token string, next http.Handler) http.Handler {
 	want := []byte(token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Scheme is case-insensitive per RFC 7235; only the token is secret, so
-		// only it gets a constant-time compare.
-		scheme, tok, ok := strings.Cut(r.Header.Get("Authorization"), " ")
-		if !ok || !strings.EqualFold(scheme, "Bearer") ||
-			subtle.ConstantTimeCompare([]byte(tok), want) != 1 {
+		// only it gets a constant-time compare. Fields tolerates arbitrary
+		// whitespace between scheme and credentials and requires exactly two.
+		fields := strings.Fields(r.Header.Get("Authorization"))
+		if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") ||
+			subtle.ConstantTimeCompare([]byte(fields[1]), want) != 1 {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}

@@ -192,9 +192,10 @@ func registerSlice2Steps(sc *godog.ScenarioContext, w *world) {
 		cliOut, w.err = w.runCLI("create", "--subject", "thin client", "--body", "b", "--json")
 		w.cfg.Host = saved
 		cliReqs = atomic.LoadInt64(&count)
-		// Stash the canned expectation for the Then via cliOut comparison.
-		if w.err == nil && strings.TrimSpace(cliOut) != canned {
-			w.err = fmt.Errorf("CLI did not print the response verbatim:\n got: %q\nwant: %q", strings.TrimSpace(cliOut), canned)
+		// Byte-for-byte: the CLI's only documented transform is a single trailing
+		// newline, so stdout must equal the response body exactly plus "\n".
+		if w.err == nil && cliOut != canned+"\n" {
+			w.err = fmt.Errorf("CLI did not print the response verbatim:\n got: %q\nwant: %q", cliOut, canned+"\n")
 		}
 		return w.err
 	})
