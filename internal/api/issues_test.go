@@ -84,14 +84,41 @@ func TestCreateChildIssue(t *testing.T) {
 		t.Fatalf("child parent_id = %v, want %q", child.ParentID, parent.ID)
 	}
 
-	// A nonexistent parent is a client error, not a persisted orphan.
-	resp, err := http.Post(srv.URL+"/issues", "application/json", strings.NewReader(`{"subject":"c","body":"b","parent_id":"nope"}`))
+	// A nonexistent parent (and an explicitly empty one) is a client error,
+	// not a persisted orphan or a silently-rooted issue.
+	for _, body := range []string{
+		`{"subject":"c","body":"b","parent_id":"nope"}`,
+		`{"subject":"c","body":"b","parent_id":""}`,
+	} {
+		resp, err := http.Post(srv.URL+"/issues", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("POST: %v", err)
+		}
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %s status = %d, want %d", body, resp.StatusCode, http.StatusBadRequest)
+		}
+		resp.Body.Close()
+	}
+}
+
+func TestUpdateIssueRejectsUnknownField(t *testing.T) {
+	srv := newTestServer(t)
+	issue := postIssue(t, srv, `{"subject":"a","body":"b"}`)
+
+	// parent_id is not a valid update field; the request must be rejected, not
+	// silently accepted with the field dropped.
+	req, err := http.NewRequest(http.MethodPatch, srv.URL+"/issues/"+issue.ID, strings.NewReader(`{"parent_id":"x"}`))
 	if err != nil {
-		t.Fatalf("POST: %v", err)
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("bad parent status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }
 

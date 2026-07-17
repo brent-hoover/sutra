@@ -11,9 +11,12 @@ import (
 )
 
 // decodeBody strictly decodes a single JSON object from the request body,
-// rejecting malformed input and any trailing data after the object.
+// rejecting malformed input, unknown fields, and any trailing data after the
+// object. Rejecting unknown fields ensures a request cannot silently succeed
+// while an unsupported field (e.g. parent_id on PATCH) is dropped.
 func decodeBody(r *http.Request, dst any) error {
 	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return errors.New("invalid JSON body")
 	}
@@ -37,7 +40,9 @@ func (s *Server) createIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	var issue domain.Issue
 	var err error
-	if req.ParentID != nil && *req.ParentID != "" {
+	if req.ParentID != nil {
+		// A supplied parent_id (even empty) must reference an existing issue;
+		// only an absent field means "no parent".
 		issue, err = s.svc.CreateChildIssue(req.Subject, req.Body, *req.ParentID)
 		if errors.Is(err, domain.ErrNotFound) {
 			writeError(w, http.StatusBadRequest, "parent issue not found")
