@@ -54,7 +54,7 @@ Feature: Issue tracking
   Scenario: Soft-delete an issue
     Given an issue
     When I delete it
-    Then deleted_at is set and it drops from default lists and search
+    Then deleted_at is set and it drops from default lists
     Given an issue is deleted
     When the change is saved
     Then a LedgerEntry of kind deleted is appended

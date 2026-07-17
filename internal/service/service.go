@@ -1,9 +1,7 @@
 package service
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -33,23 +31,20 @@ func New(cfg config.Config) (*Service, error) {
 		st.Close()
 		return nil, err
 	}
-	svc := &Service{store: st, projectsDir: abs}
-
-	// Pin the projects directory now, as a directory handle, so later ingest and
-	// discover operate on this exact directory — a symlink swap of the path
-	// afterwards cannot redirect them (TOCTOU-safe). A missing directory is
-	// fine: ingest/discover then simply find nothing.
+	// Create the projects directory if absent, then pin it as a directory handle
+	// so later ingest and discover operate on this exact directory — a symlink
+	// swap of the path afterwards cannot redirect them (TOCTOU-safe). Creating it
+	// at startup means sessions added later are discoverable without a restart.
+	if err := os.MkdirAll(abs, 0o700); err != nil {
+		st.Close()
+		return nil, fmt.Errorf("create projects dir: %w", err)
+	}
 	root, err := os.OpenRoot(abs)
-	switch {
-	case err == nil:
-		svc.projectsRoot = root
-	case errors.Is(err, fs.ErrNotExist):
-		// leave projectsRoot nil — nothing to ingest/discover yet
-	default:
+	if err != nil {
 		st.Close()
 		return nil, fmt.Errorf("open projects dir: %w", err)
 	}
-	return svc, nil
+	return &Service{store: st, projectsDir: abs, projectsRoot: root}, nil
 }
 
 // Close releases the pinned projects root and the underlying store.

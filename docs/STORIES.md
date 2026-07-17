@@ -69,7 +69,7 @@ As a developer or agent, I want to add comments so that discussion stays with th
 As a developer, I want to delete an issue without losing history so that mistakes are recoverable.
 
 **Acceptance criteria:**
-- Given an issue, When I delete it, Then `deleted_at` is set and it drops from default lists and search
+- Given an issue, When I delete it, Then `deleted_at` is set and it drops from default lists
 - Given an issue is deleted, When the change is saved, Then a `LedgerEntry` of kind `deleted` is appended
 
 **Priority:** must

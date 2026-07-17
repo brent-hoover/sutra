@@ -9,9 +9,16 @@ import (
 	"github.com/brent-hoover/sutra/internal/domain"
 )
 
-// CreateDocument inserts a document.
+// CreateDocument inserts a document and advances the owning issue's updated_at
+// in the same transaction (attaching a document is a change to the issue).
 func (s *Store) CreateDocument(doc domain.Document) error {
-	if _, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
 		`INSERT INTO documents (id, issue_id, kind, title, content, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		doc.ID, doc.IssueID, string(doc.Kind), doc.Title, doc.Content,
@@ -19,7 +26,13 @@ func (s *Store) CreateDocument(doc domain.Document) error {
 	); err != nil {
 		return fmt.Errorf("insert document: %w", err)
 	}
-	return nil
+	if _, err := tx.Exec(
+		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		time.Now().UTC().Format(timeFmt), doc.IssueID,
+	); err != nil {
+		return fmt.Errorf("bump issue updated_at: %w", err)
+	}
+	return tx.Commit()
 }
 
 const documentColumns = `id, issue_id, kind, title, content, created_at, updated_at`
@@ -119,24 +132,42 @@ func (s *Store) UpdateDocument(id, content string) (domain.Document, error) {
 	if err != nil {
 		return domain.Document{}, err
 	}
+	// Updating a document is a change to the owning issue.
+	if _, err := tx.Exec(
+		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		now.Format(timeFmt), doc.IssueID,
+	); err != nil {
+		return domain.Document{}, fmt.Errorf("bump issue updated_at: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Document{}, err
 	}
 	return doc, nil
 }
 
-// DeleteDocument removes the document, returning ErrNotFound if it does not exist.
+// DeleteDocument removes the document and advances the owning issue's
+// updated_at in the same transaction, returning ErrNotFound if it does not exist.
 func (s *Store) DeleteDocument(id string) error {
-	res, err := s.db.Exec(`DELETE FROM documents WHERE id = ?`, id)
+	tx, err := s.db.Begin()
 	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var issueID string
+	if err := tx.QueryRow(`SELECT issue_id FROM documents WHERE id = ?`, id).Scan(&issueID); errors.Is(err, sql.ErrNoRows) {
+		return domain.ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("lookup document: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM documents WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete document: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete document rows: %w", err)
+	if _, err := tx.Exec(
+		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		time.Now().UTC().Format(timeFmt), issueID,
+	); err != nil {
+		return fmt.Errorf("bump issue updated_at: %w", err)
 	}
-	if n == 0 {
-		return domain.ErrNotFound
-	}
-	return nil
+	return tx.Commit()
 }

@@ -28,10 +28,6 @@ func (s *Service) IngestTranscript(path string) (domain.Transcript, error) {
 	// projectsRoot handle (opened once at construction) makes this TOCTOU-safe:
 	// neither the projects dir nor any symlink component can be swapped to
 	// escape it between check and open.
-	if s.projectsRoot == nil {
-		return domain.Transcript{}, errors.Join(domain.ErrInvalidTranscript,
-			fmt.Errorf("projects directory %q is unavailable", s.projectsDir))
-	}
 	rel, err := s.relWithinProjects(path)
 	if err != nil {
 		return domain.Transcript{}, err
@@ -139,9 +135,6 @@ func (s *Service) TranscriptsForIssue(issueID string) ([]domain.Transcript, erro
 func (s *Service) DiscoverTranscripts(dir string) ([]domain.DiscoveredTranscript, error) {
 	// Walk the pinned projects root (TOCTOU-safe). An empty dir scans the whole
 	// projects dir; a caller-supplied dir must live within it.
-	if s.projectsRoot == nil {
-		return nil, nil // no projects dir yet — nothing to discover
-	}
 	sub := "."
 	if dir != "" {
 		rel, err := s.relWithinProjects(dir)
