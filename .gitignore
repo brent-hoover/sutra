@@ -21,3 +21,6 @@ coverage.out
 
 # roborev snapshots
 /.roborev/
+
+# git worktrees (managed locally)
+.worktrees/

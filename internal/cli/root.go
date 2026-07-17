@@ -29,6 +29,7 @@ func NewRoot(cfg config.Config) *cobra.Command {
 		deleteCmd(cfg),
 		historyCmd(cfg),
 		commentCmd(cfg),
+		docCmd(cfg),
 	)
 	return root
 }
