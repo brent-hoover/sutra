@@ -143,7 +143,14 @@ func (s *Store) LinkTranscript(transcriptID, issueID string, entry domain.Ledger
 	} else if err != nil {
 		return domain.Transcript{}, fmt.Errorf("lookup transcript: %w", err)
 	}
-	if current.Valid && current.String != issueID {
+	if current.Valid {
+		if current.String == issueID {
+			// Already linked to this issue: idempotent — no new ledger entry and
+			// no updated_at bump. Release the connection before reading back
+			// (the single-connection pool is held by this tx).
+			_ = tx.Rollback()
+			return s.GetTranscript(transcriptID)
+		}
 		return domain.Transcript{}, errors.Join(domain.ErrInvalidTranscript,
 			fmt.Errorf("transcript already linked to issue %s", current.String))
 	}

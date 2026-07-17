@@ -65,6 +65,11 @@ func (s *Server) linkTranscript(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "transcript or issue not found")
 		return
 	}
+	if errors.Is(err, domain.ErrInvalidTranscript) {
+		// e.g. already linked to a different issue — a conflict, not a server error.
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

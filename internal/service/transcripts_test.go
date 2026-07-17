@@ -157,3 +157,75 @@ func TestReingestPreservesMessageIDsAndIssueLink(t *testing.T) {
 		}
 	}
 }
+
+// Finding (iter5 #1): a JSONL line larger than the old 8 MiB scanner cap must
+// still be ingested losslessly.
+func TestIngestLargeLine(t *testing.T) {
+	projectsDir := t.TempDir()
+	svc := newService(t, projectsDir)
+
+	big := strings.Repeat("x", 10*1024*1024) // 10 MiB, larger than the old cap
+	lines := []string{
+		`{"type":"user","message":{"role":"user","content":"start"},"timestamp":"2026-07-16T10:00:00Z"}`,
+		big,
+	}
+	path := writeSession(t, filepath.Join(projectsDir, "-Users-me-proj"), "biglinesession", lines)
+
+	tr, err := svc.IngestTranscript(path)
+	if err != nil {
+		t.Fatalf("ingest large line: %v", err)
+	}
+	if len(tr.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(tr.Messages))
+	}
+	if len(tr.Messages[1].Raw) != len(big) {
+		t.Errorf("large line raw len = %d, want %d", len(tr.Messages[1].Raw), len(big))
+	}
+}
+
+// Finding (iter5 #2/#3): relinking to the same issue is idempotent (one ledger
+// entry); relinking to a different issue is rejected.
+func TestRelinkIdempotentAndConflict(t *testing.T) {
+	projectsDir := t.TempDir()
+	svc := newService(t, projectsDir)
+	path := writeSession(t, filepath.Join(projectsDir, "-Users-me-proj"), "relinksession", sessionLines())
+
+	tr, err := svc.IngestTranscript(path)
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	a, err := svc.CreateIssue("Issue A", "body")
+	if err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+	b, err := svc.CreateIssue("Issue B", "body")
+	if err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+
+	if _, err := svc.LinkTranscript(tr.ID, a.ID); err != nil {
+		t.Fatalf("first link: %v", err)
+	}
+	// Re-link to the same issue: no error, and no second ledger entry.
+	if _, err := svc.LinkTranscript(tr.ID, a.ID); err != nil {
+		t.Fatalf("idempotent relink: %v", err)
+	}
+	history, err := svc.IssueHistory(a.ID)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	linked := 0
+	for _, e := range history {
+		if e.Kind == domain.LedgerLinked {
+			linked++
+		}
+	}
+	if linked != 1 {
+		t.Errorf("linked ledger entries = %d, want 1 (idempotent)", linked)
+	}
+
+	// Re-link to a different issue: rejected.
+	if _, err := svc.LinkTranscript(tr.ID, b.ID); !errors.Is(err, domain.ErrInvalidTranscript) {
+		t.Errorf("relink to different issue: err = %v, want ErrInvalidTranscript", err)
+	}
+}

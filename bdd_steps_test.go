@@ -981,6 +981,10 @@ func registerSlice3Steps(sc *godog.ScenarioContext, w *world) {
 		if containsIssue(listed, w.issue.ID) {
 			return fmt.Errorf("deleted issue %s still appears in default list", w.issue.ID)
 		}
+		// Exclusion from *search* is asserted by the Search slice (S7), whose
+		// scenario seeds a soft-deleted issue and checks it is excluded from
+		// results. Search does not exist yet, so only list exclusion is verified
+		// here; do not claim search coverage from this step.
 		return nil
 	})
 	sc.Step(`^an issue is deleted$`, func() error {

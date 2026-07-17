@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -73,26 +74,33 @@ func (s *Service) IngestTranscript(path string) (domain.Transcript, error) {
 		CreatedAt:  now,
 	}
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024) // tolerate long lines
+	// Read line-by-line with a bufio.Reader (no per-line size cap, unlike
+	// bufio.Scanner) so an arbitrarily large JSONL line is still captured.
+	reader := bufio.NewReader(f)
 	seq := 0
-	for scanner.Scan() {
-		// Ingestion is lossless: every line becomes exactly one Message and its
-		// Raw is the line verbatim (no trimming, blanks preserved).
-		line := scanner.Text()
-		msg, at := parseLine(line, seq)
-		t.Messages = append(t.Messages, msg)
-		// captured_at and title come from the first event that supplies them.
-		if t.CapturedAt.IsZero() && at != nil {
-			t.CapturedAt = *at
+	for {
+		raw, readErr := reader.ReadString('\n')
+		if len(raw) > 0 {
+			// Ingestion is lossless: every line becomes exactly one Message and
+			// its Raw is the line content (delimiter stripped, blanks preserved).
+			line := strings.TrimSuffix(strings.TrimSuffix(raw, "\n"), "\r")
+			msg, at := parseLine(line, seq)
+			t.Messages = append(t.Messages, msg)
+			// captured_at and title come from the first event that supplies them.
+			if t.CapturedAt.IsZero() && at != nil {
+				t.CapturedAt = *at
+			}
+			if t.Title == "" && msg.Role == domain.RoleUser {
+				t.Title = deriveTitle(msg.Text)
+			}
+			seq++
 		}
-		if t.Title == "" && msg.Role == domain.RoleUser {
-			t.Title = deriveTitle(msg.Text)
+		if readErr == io.EOF {
+			break
 		}
-		seq++
-	}
-	if err := scanner.Err(); err != nil {
-		return domain.Transcript{}, fmt.Errorf("read transcript: %w", err)
+		if readErr != nil {
+			return domain.Transcript{}, fmt.Errorf("read transcript: %w", readErr)
+		}
 	}
 
 	// Fall back to file mtime when no event carried a timestamp.
