@@ -26,6 +26,7 @@ func Handler(svc *service.Service) http.Handler {
 	mux.HandleFunc("DELETE /issues/{id}", s.deleteIssue)
 	mux.HandleFunc("GET /issues/{id}/history", s.issueHistory)
 	mux.HandleFunc("POST /issues/{id}/comments", s.createComment)
+	mux.HandleFunc("GET /issues/{id}/comments", s.listComments)
 	mux.HandleFunc("POST /issues/{id}/documents", s.attachDocument)
 	mux.HandleFunc("GET /issues/{id}/documents", s.listDocuments)
 	mux.HandleFunc("GET /documents/{id}", s.getDocument)

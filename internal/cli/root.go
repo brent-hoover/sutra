@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,14 +11,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// TUILauncher launches the interactive TUI. It is injected by the composition
+// root (cmd/sutra) so this package need not import internal/tui, which the
+// architecture rules forbid (cli may import domain, client, api, config only).
+var TUILauncher func(ctx context.Context, cfg config.Config) error
+
 // NewRoot builds the root command tree over the given config. Exposed so
 // tests can drive the real commands with controlled args and output.
+//
+// Running `sutra` with no subcommand launches the TUI (when a launcher has been
+// injected); the subcommands are the CLI and the daemon.
 func NewRoot(cfg config.Config) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "sutra",
 		Short:         "Sutra — an issue tracker for agent-assisted development",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if TUILauncher == nil {
+				return errors.New("TUI is not available in this build")
+			}
+			return TUILauncher(cmd.Context(), cfg)
+		},
 	}
 	root.PersistentFlags().Bool("json", false, "print the raw JSON API response")
 	root.AddCommand(

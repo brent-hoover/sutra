@@ -865,6 +865,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	})
 
 	registerSlice3Steps(sc, w)
+	registerSlice8Steps(sc, w)
 	registerSlice7Steps(sc, w)
 }
 
