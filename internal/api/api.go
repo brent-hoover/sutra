@@ -20,7 +20,12 @@ func Handler(svc *service.Service) http.Handler {
 	s := &Server{svc: svc}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /issues", s.createIssue)
+	mux.HandleFunc("GET /issues", s.listIssues)
 	mux.HandleFunc("GET /issues/{id}", s.getIssue)
+	mux.HandleFunc("PATCH /issues/{id}", s.updateIssue)
+	mux.HandleFunc("DELETE /issues/{id}", s.deleteIssue)
+	mux.HandleFunc("GET /issues/{id}/history", s.issueHistory)
+	mux.HandleFunc("POST /issues/{id}/comments", s.createComment)
 	return mux
 }
 

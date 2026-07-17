@@ -96,6 +96,13 @@ CREATE TABLE IF NOT EXISTS ledger (
     field     TEXT NOT NULL DEFAULT '',
     old_value TEXT NOT NULL DEFAULT '',
     new_value TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS comments (
+    id         TEXT PRIMARY KEY,
+    issue_id   TEXT NOT NULL,
+    author     TEXT NOT NULL DEFAULT '',
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)

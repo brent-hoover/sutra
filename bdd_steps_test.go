@@ -36,6 +36,10 @@ type world struct {
 	subject   string
 	body      string
 	issue     domain.Issue
+	updated   domain.Issue   // issue as returned after an update
+	issues    []domain.Issue // issues created for list/filter scenarios
+	listOut   []domain.Issue // most recent list/filter result
+	history   []domain.LedgerEntry
 	viewOut   string
 	err       error
 	envBackup map[string]*string // original env values to restore in teardown
@@ -203,6 +207,50 @@ func (w *world) createIssue(subject, body string) {
 	}
 }
 
+// create runs the create command and returns the parsed issue (for scenarios
+// that build several issues).
+func (w *world) create(subject, body string) (domain.Issue, error) {
+	out, err := w.runCLI("create", "--subject", subject, "--body", body, "--json")
+	if err != nil {
+		return domain.Issue{}, err
+	}
+	var i domain.Issue
+	return i, json.Unmarshal([]byte(strings.TrimSpace(out)), &i)
+}
+
+// updateIssue runs `update <id>` with flags and returns the parsed issue.
+func (w *world) updateIssue(id string, flags ...string) (domain.Issue, error) {
+	args := append([]string{"update", id}, flags...)
+	args = append(args, "--json")
+	out, err := w.runCLI(args...)
+	if err != nil {
+		return domain.Issue{}, err
+	}
+	var i domain.Issue
+	return i, json.Unmarshal([]byte(strings.TrimSpace(out)), &i)
+}
+
+// listIssues runs `list` with optional filter flags and returns the parsed set.
+func (w *world) listIssues(flags ...string) ([]domain.Issue, error) {
+	args := append([]string{"list"}, flags...)
+	args = append(args, "--json")
+	out, err := w.runCLI(args...)
+	if err != nil {
+		return nil, err
+	}
+	var issues []domain.Issue
+	return issues, json.Unmarshal([]byte(strings.TrimSpace(out)), &issues)
+}
+
+func containsIssue(issues []domain.Issue, id string) bool {
+	for _, i := range issues {
+		if i.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // InitializeScenario wires a fresh world per scenario and registers steps.
 func InitializeScenario(sc *godog.ScenarioContext) {
 	w := &world{}
@@ -317,6 +365,294 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		}
 		if _, err := w.runCLI("view", w.issue.ID, "--json"); err != nil {
 			return fmt.Errorf("daemon did not read back through the store: %w", err)
+		}
+		return nil
+	})
+
+	registerSlice3Steps(sc, w)
+}
+
+// registerSlice3Steps wires the step definitions for the @slice3 scenarios:
+// list, update, comment, soft-delete, history, and filter.
+func registerSlice3Steps(sc *godog.ScenarioContext, w *world) {
+	// --- List issues ---
+	sc.Step(`^several live issues exist$`, func() error {
+		w.issues = nil
+		for _, s := range []string{"first", "second", "third"} {
+			i, err := w.create(s+" subject", s+" body")
+			if err != nil {
+				return err
+			}
+			w.issues = append(w.issues, i)
+		}
+		return nil
+	})
+	sc.Step(`^I list issues$`, func() error {
+		w.listOut, w.err = w.listIssues()
+		return w.err
+	})
+	sc.Step(`^all live issues are returned$`, func() error {
+		if len(w.listOut) != len(w.issues) {
+			return fmt.Errorf("expected %d issues, got %d", len(w.issues), len(w.listOut))
+		}
+		for _, want := range w.issues {
+			if !containsIssue(w.listOut, want.ID) {
+				return fmt.Errorf("issue %s missing from list", want.ID)
+			}
+		}
+		return nil
+	})
+	sc.Step(`^one of those issues is soft-deleted$`, func() error {
+		if _, err := w.runCLI("delete", w.issues[0].ID, "--json"); err != nil {
+			return err
+		}
+		return nil
+	})
+	sc.Step(`^the soft-deleted one is excluded by default$`, func() error {
+		if containsIssue(w.listOut, w.issues[0].ID) {
+			return fmt.Errorf("soft-deleted issue %s still listed", w.issues[0].ID)
+		}
+		for _, want := range w.issues[1:] {
+			if !containsIssue(w.listOut, want.ID) {
+				return fmt.Errorf("live issue %s missing from list", want.ID)
+			}
+		}
+		return nil
+	})
+
+	// --- Update issue fields ---
+	sc.Step(`^an open issue$`, func() error {
+		w.issue, w.err = w.create("Update me", "body to update")
+		return w.err
+	})
+	sc.Step(`^I change its status to in_progress$`, func() error {
+		w.updated, w.err = w.updateIssue(w.issue.ID, "--status", "in_progress")
+		return w.err
+	})
+	sc.Step(`^the field updates and updated_at advances$`, func() error {
+		if w.updated.Status != domain.StatusInProgress {
+			return fmt.Errorf("status = %q, want in_progress", w.updated.Status)
+		}
+		if !w.updated.UpdatedAt.After(w.issue.UpdatedAt) {
+			return fmt.Errorf("updated_at did not advance: before=%s after=%s", w.issue.UpdatedAt, w.updated.UpdatedAt)
+		}
+		return nil
+	})
+	sc.Step(`^a field on an issue changes$`, func() error {
+		// Reuse the change already made above if present; otherwise make one.
+		if w.updated.ID == "" {
+			w.issue, w.err = w.create("Change me", "body")
+			if w.err != nil {
+				return w.err
+			}
+			w.updated, w.err = w.updateIssue(w.issue.ID, "--status", "in_progress")
+		}
+		return w.err
+	})
+	sc.Step(`^the change is saved$`, func() error { return nil }) // persisted by the preceding step
+	sc.Step(`^a LedgerEntry of kind status_changed with field, old_value, and new_value is appended$`, func() error {
+		history, err := w.verify.IssueHistory(w.issue.ID)
+		if err != nil {
+			return err
+		}
+		for _, e := range history {
+			if e.Kind != domain.LedgerStatusChanged {
+				continue
+			}
+			if e.Field != "status" {
+				return fmt.Errorf("status_changed field = %q, want status", e.Field)
+			}
+			if e.OldValue != "open" || e.NewValue != "in_progress" {
+				return fmt.Errorf("status_changed old/new = %q/%q, want open/in_progress", e.OldValue, e.NewValue)
+			}
+			return nil
+		}
+		return fmt.Errorf("no status_changed LedgerEntry found (%d entries)", len(history))
+	})
+
+	// --- Comment / Soft-delete share the "an issue" step ---
+	sc.Step(`^an issue$`, func() error {
+		w.issue, w.err = w.create("Discuss me", "body for comments and deletes")
+		return w.err
+	})
+
+	// --- Comment on an issue ---
+	sc.Step(`^I add a comment with a body$`, func() error {
+		_, w.err = w.runCLI("comment", w.issue.ID, "--body", "a considered comment", "--json")
+		return w.err
+	})
+	sc.Step(`^a Comment is stored and a LedgerEntry of kind commented is appended$`, func() error {
+		comments, err := w.verify.IssueComments(w.issue.ID)
+		if err != nil {
+			return err
+		}
+		if len(comments) == 0 {
+			return fmt.Errorf("no comment stored")
+		}
+		if comments[0].Body != "a considered comment" {
+			return fmt.Errorf("comment body = %q", comments[0].Body)
+		}
+		history, err := w.verify.IssueHistory(w.issue.ID)
+		if err != nil {
+			return err
+		}
+		for _, e := range history {
+			if e.Kind == domain.LedgerCommented {
+				return nil
+			}
+		}
+		return fmt.Errorf("no commented LedgerEntry found (%d entries)", len(history))
+	})
+
+	// --- Soft-delete an issue ---
+	sc.Step(`^I delete it$`, func() error {
+		_, w.err = w.runCLI("delete", w.issue.ID, "--json")
+		return w.err
+	})
+	sc.Step(`^deleted_at is set and it drops from default lists and search$`, func() error {
+		stored, err := w.verify.GetIssue(w.issue.ID)
+		if err != nil {
+			return err
+		}
+		if stored.DeletedAt == nil {
+			return fmt.Errorf("deleted_at not set")
+		}
+		listed, err := w.listIssues()
+		if err != nil {
+			return err
+		}
+		if containsIssue(listed, w.issue.ID) {
+			return fmt.Errorf("deleted issue %s still appears in default list", w.issue.ID)
+		}
+		return nil
+	})
+	sc.Step(`^an issue is deleted$`, func() error {
+		if w.issue.ID == "" {
+			w.issue, w.err = w.create("Delete me", "body")
+			if w.err != nil {
+				return w.err
+			}
+		}
+		if _, err := w.runCLI("delete", w.issue.ID, "--json"); err != nil {
+			return err
+		}
+		return nil
+	})
+	sc.Step(`^a LedgerEntry of kind deleted is appended$`, func() error {
+		history, err := w.verify.IssueHistory(w.issue.ID)
+		if err != nil {
+			return err
+		}
+		for _, e := range history {
+			if e.Kind == domain.LedgerDeleted {
+				return nil
+			}
+		}
+		return fmt.Errorf("no deleted LedgerEntry found (%d entries)", len(history))
+	})
+
+	// --- View an issue's change history ---
+	sc.Step(`^an issue with several changes$`, func() error {
+		w.issue, w.err = w.create("History me", "body")
+		if w.err != nil {
+			return w.err
+		}
+		for _, flags := range [][]string{
+			{"--status", "in_progress"},
+			{"--priority", "p1"},
+			{"--owner", "agent-x"},
+		} {
+			if _, err := w.updateIssue(w.issue.ID, flags...); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	sc.Step(`^I view its history$`, func() error {
+		out, err := w.runCLI("history", w.issue.ID, "--json")
+		if err != nil {
+			w.err = err
+			return err
+		}
+		w.err = json.Unmarshal([]byte(strings.TrimSpace(out)), &w.history)
+		return w.err
+	})
+	sc.Step(`^LedgerEntry rows appear in chronological order$`, func() error {
+		if len(w.history) < 2 {
+			return fmt.Errorf("expected several ledger rows, got %d", len(w.history))
+		}
+		for i := 1; i < len(w.history); i++ {
+			if w.history[i].At.Before(w.history[i-1].At) {
+				return fmt.Errorf("ledger not chronological at index %d", i)
+			}
+		}
+		return nil
+	})
+
+	// --- Filter issues ---
+	sc.Step(`^issues with varied status, type, priority, labels, and owner$`, func() error {
+		w.issues = nil
+		// I1: bug + open (default status)
+		i1, err := w.create("bug open", "body")
+		if err != nil {
+			return err
+		}
+		if i1, err = w.updateIssue(i1.ID, "--type", "bug"); err != nil {
+			return err
+		}
+		// I2: bug + in_progress
+		i2, err := w.create("bug in progress", "body")
+		if err != nil {
+			return err
+		}
+		if i2, err = w.updateIssue(i2.ID, "--type", "bug", "--status", "in_progress"); err != nil {
+			return err
+		}
+		// I3: task + open (defaults)
+		i3, err := w.create("task open", "body")
+		if err != nil {
+			return err
+		}
+		w.issues = []domain.Issue{i1, i2, i3}
+		return nil
+	})
+	sc.Step(`^I list with a filter such as status=open, label=bug, or owner=AGENT$`, func() error {
+		// Label filtering arrives with labels in slice 4; filter on an
+		// S3-supported field here.
+		w.listOut, w.err = w.listIssues("--status", "open")
+		return w.err
+	})
+	sc.Step(`^only matching, non-soft-deleted issues are returned$`, func() error {
+		if len(w.listOut) == 0 {
+			return fmt.Errorf("expected matches, got none")
+		}
+		for _, i := range w.listOut {
+			if i.Status != domain.StatusOpen {
+				return fmt.Errorf("issue %s has status %q, want open", i.ID, i.Status)
+			}
+			if i.DeletedAt != nil {
+				return fmt.Errorf("soft-deleted issue %s returned", i.ID)
+			}
+		}
+		return nil
+	})
+	sc.Step(`^multiple filters$`, func() error { return nil })
+	sc.Step(`^I combine them$`, func() error {
+		w.listOut, w.err = w.listIssues("--type", "bug", "--status", "open")
+		return w.err
+	})
+	sc.Step(`^results match all filters using AND$`, func() error {
+		if len(w.listOut) == 0 {
+			return fmt.Errorf("expected AND matches, got none")
+		}
+		for _, i := range w.listOut {
+			if i.Type != domain.TypeBug || i.Status != domain.StatusOpen {
+				return fmt.Errorf("issue %s (type=%q status=%q) violates AND filter", i.ID, i.Type, i.Status)
+			}
+		}
+		// I2 (bug/in_progress) and I3 (task/open) must be excluded.
+		if containsIssue(w.listOut, w.issues[1].ID) || containsIssue(w.listOut, w.issues[2].ID) {
+			return fmt.Errorf("AND filter returned non-matching issues")
 		}
 		return nil
 	})

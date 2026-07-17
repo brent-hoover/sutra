@@ -35,6 +35,43 @@ const (
 	P3 Priority = "p3"
 )
 
+// Valid reports whether t is a known issue type.
+func (t IssueType) Valid() bool {
+	switch t {
+	case TypeFeature, TypeBug, TypeTask, TypeChore:
+		return true
+	}
+	return false
+}
+
+// Valid reports whether s is a known status.
+func (s Status) Valid() bool {
+	switch s {
+	case StatusOpen, StatusInProgress, StatusClosed:
+		return true
+	}
+	return false
+}
+
+// Valid reports whether p is a known priority.
+func (p Priority) Valid() bool {
+	switch p {
+	case P0, P1, P2, P3:
+		return true
+	}
+	return false
+}
+
+// IssueFilter narrows a list query. A zero-value field imposes no constraint;
+// filters combine with AND. Labels arrive with the label feature in a later
+// slice and are not applied here yet.
+type IssueFilter struct {
+	Status   Status
+	Type     IssueType
+	Priority Priority
+	Owner    string
+}
+
 // ErrInvalidIssue is returned when an issue fails validation.
 var ErrInvalidIssue = errors.New("invalid issue")
 

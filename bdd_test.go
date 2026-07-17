@@ -6,7 +6,8 @@ package main_test
 // green — it is what `go test ./...` checks by default. TestBacklog runs the
 // full spec suite (pending slices show as undefined/red) and is opt-in via
 // SUTRA_BACKLOG=1, so unimplemented future work doesn't fail the default run.
-// Extend implementedTags as each slice lands (e.g. "@slice1 || @slice2").
+// Extend implementedTags as each slice lands; godog's OR is a comma
+// (e.g. "@slice1,@slice2").
 
 import (
 	"os"
@@ -15,7 +16,7 @@ import (
 	"github.com/cucumber/godog"
 )
 
-const implementedTags = "@slice1"
+const implementedTags = "@slice1,@slice3"
 
 func TestImplemented(t *testing.T) {
 	suite := godog.TestSuite{

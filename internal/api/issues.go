@@ -7,7 +7,21 @@ import (
 	"net/http"
 
 	"github.com/brent-hoover/sutra/internal/domain"
+	"github.com/brent-hoover/sutra/internal/service"
 )
+
+// decodeBody strictly decodes a single JSON object from the request body,
+// rejecting malformed input and any trailing data after the object.
+func decodeBody(r *http.Request, dst any) error {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(dst); err != nil {
+		return errors.New("invalid JSON body")
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("unexpected trailing data in body")
+	}
+	return nil
+}
 
 type createIssueRequest struct {
 	Subject string `json:"subject"`
@@ -16,13 +30,8 @@ type createIssueRequest struct {
 
 func (s *Server) createIssue(w http.ResponseWriter, r *http.Request) {
 	var req createIssueRequest
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "unexpected trailing data in body")
+	if err := decodeBody(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	issue, err := s.svc.CreateIssue(req.Subject, req.Body)
@@ -35,6 +44,83 @@ func (s *Server) createIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, issue)
+}
+
+func (s *Server) listIssues(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	issues, err := s.svc.ListIssues(domain.IssueFilter{
+		Status:   domain.Status(q.Get("status")),
+		Type:     domain.IssueType(q.Get("type")),
+		Priority: domain.Priority(q.Get("priority")),
+		Owner:    q.Get("owner"),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if issues == nil {
+		issues = []domain.Issue{}
+	}
+	writeJSON(w, http.StatusOK, issues)
+}
+
+type updateIssueRequest struct {
+	Type     *domain.IssueType `json:"type"`
+	Status   *domain.Status    `json:"status"`
+	Priority *domain.Priority  `json:"priority"`
+	Owner    *string           `json:"owner"`
+}
+
+func (s *Server) updateIssue(w http.ResponseWriter, r *http.Request) {
+	var req updateIssueRequest
+	if err := decodeBody(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	issue, err := s.svc.UpdateIssue(r.PathValue("id"), service.IssueUpdate{
+		Type:     req.Type,
+		Status:   req.Status,
+		Priority: req.Priority,
+		Owner:    req.Owner,
+	})
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+	if errors.Is(err, domain.ErrInvalidIssue) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, issue)
+}
+
+func (s *Server) deleteIssue(w http.ResponseWriter, r *http.Request) {
+	issue, err := s.svc.SoftDeleteIssue(r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, issue)
+}
+
+func (s *Server) issueHistory(w http.ResponseWriter, r *http.Request) {
+	entries, err := s.svc.IssueHistory(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if entries == nil {
+		entries = []domain.LedgerEntry{}
+	}
+	writeJSON(w, http.StatusOK, entries)
 }
 
 func (s *Server) getIssue(w http.ResponseWriter, r *http.Request) {

@@ -24,6 +24,11 @@ func NewRoot(cfg config.Config) *cobra.Command {
 		serveCmd(cfg),
 		createCmd(cfg),
 		viewCmd(cfg),
+		listCmd(cfg),
+		updateCmd(cfg),
+		deleteCmd(cfg),
+		historyCmd(cfg),
+		commentCmd(cfg),
 	)
 	return root
 }

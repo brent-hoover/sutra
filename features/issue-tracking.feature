@@ -15,6 +15,7 @@ Feature: Issue tracking
     When I try to create the issue
     Then it is rejected
 
+  @slice3
   Scenario: List issues
     Given several live issues exist
     When I list issues
@@ -34,6 +35,7 @@ Feature: Issue tracking
     When I view it by id
     Then its fields, labels, related and blocking links, and comments are shown
 
+  @slice3
   Scenario: Update issue fields
     Given an open issue
     When I change its status to in_progress
@@ -42,11 +44,13 @@ Feature: Issue tracking
     When the change is saved
     Then a LedgerEntry of kind status_changed with field, old_value, and new_value is appended
 
+  @slice3
   Scenario: Comment on an issue
     Given an issue
     When I add a comment with a body
     Then a Comment is stored and a LedgerEntry of kind commented is appended
 
+  @slice3
   Scenario: Soft-delete an issue
     Given an issue
     When I delete it
@@ -83,11 +87,13 @@ Feature: Issue tracking
     When I remove the label
     Then it no longer appears in labels
 
+  @slice3
   Scenario: View an issue's change history
     Given an issue with several changes
     When I view its history
     Then LedgerEntry rows appear in chronological order
 
+  @slice3
   Scenario: Filter issues
     Given issues with varied status, type, priority, labels, and owner
     When I list with a filter such as status=open, label=bug, or owner=AGENT
