@@ -37,6 +37,8 @@ func Handler(svc *service.Service) http.Handler {
 	mux.HandleFunc("GET /transcripts", s.discoverTranscripts)
 	mux.HandleFunc("GET /transcripts/{id}", s.getTranscript)
 	mux.HandleFunc("POST /transcripts/{id}/link", s.linkTranscript)
+	// Search (slice 7).
+	mux.HandleFunc("GET /search", s.search)
 	return mux
 }
 

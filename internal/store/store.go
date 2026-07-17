@@ -122,5 +122,10 @@ CREATE INDEX IF NOT EXISTS idx_documents_issue_id ON documents (issue_id);`
 	if err := s.migrateTranscripts(); err != nil {
 		return err
 	}
+	// Search depends on the issues, documents, and messages tables existing, so
+	// its FTS index and triggers migrate last.
+	if err := s.migrateSearch(); err != nil {
+		return err
+	}
 	return nil
 }

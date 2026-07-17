@@ -285,26 +285,5 @@ func (s *Store) messagesFor(transcriptID string) ([]domain.Message, error) {
 		return nil, fmt.Errorf("query messages: %w", err)
 	}
 	defer rows.Close()
-
-	var out []domain.Message
-	for rows.Next() {
-		var (
-			m    domain.Message
-			role string
-			at   sql.NullString
-		)
-		if err := rows.Scan(&m.ID, &m.TranscriptID, &m.Seq, &role, &m.Text, &m.Raw, &at); err != nil {
-			return nil, fmt.Errorf("scan message: %w", err)
-		}
-		m.Role = domain.Role(role)
-		if at.Valid {
-			ts, err := time.Parse(timeFmt, at.String)
-			if err != nil {
-				return nil, fmt.Errorf("parse message at: %w", err)
-			}
-			m.At = &ts
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
+	return scanMessages(rows)
 }
