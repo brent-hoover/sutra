@@ -100,5 +100,7 @@ func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	// Every operation returns JSON (project contract) — a removal result rather
+	// than an empty 204, so --json has a raw body to print.
+	writeJSON(w, http.StatusOK, map[string]any{"id": r.PathValue("id"), "deleted": true})
 }

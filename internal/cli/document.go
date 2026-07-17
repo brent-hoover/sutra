@@ -102,10 +102,14 @@ func docRemoveCmd(cfg config.Config) *cobra.Command {
 		Short: "Remove a document",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := client.New(cfg).RemoveDocument(cmd.Context(), args[0]); err != nil {
+			raw, err := client.New(cfg).RemoveDocument(cmd.Context(), args[0])
+			if err != nil {
 				return err
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "removed %s\n", args[0])
+			if handled, err := docWantJSON(cmd, raw); handled {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "removed %s\n", args[0])
 			return err
 		},
 	}

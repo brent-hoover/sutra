@@ -473,14 +473,9 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		if w.transcript.SessionID != w.sessionID {
 			return fmt.Errorf("session_id = %q, want %q", w.transcript.SessionID, w.sessionID)
 		}
-		// Ingest stores the symlink-resolved path (TOCTOU-safe), so resolve the
-		// expected fixture path the same way before comparing (on macOS the temp
-		// dir lives under a /var -> /private/var symlink).
-		abs, _ := filepath.Abs(w.sessionPath)
-		wantPath, err := filepath.EvalSymlinks(abs)
-		if err != nil {
-			return err
-		}
+		// Ingest stores the logical path under the projects dir (not symlink-
+		// resolved); the pinned projects-dir handle is what enforces confinement.
+		wantPath, _ := filepath.Abs(w.sessionPath)
 		if w.transcript.SourcePath != wantPath {
 			return fmt.Errorf("source_path = %q, want %q", w.transcript.SourcePath, wantPath)
 		}

@@ -85,26 +85,27 @@ func (c *Client) UpdateDocument(ctx context.Context, id, content string) (Docume
 	return c.doDocument(req, http.StatusOK)
 }
 
-// RemoveDocument deletes a document via the daemon.
-func (c *Client) RemoveDocument(ctx context.Context, id string) error {
+// RemoveDocument deletes a document via the daemon, returning the raw JSON
+// deletion result.
+func (c *Client) RemoveDocument(ctx context.Context, id string) (json.RawMessage, error) {
 	req, err := c.newRequest(ctx, http.MethodDelete, "/documents/"+url.PathEscape(id), nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("daemon returned %s: %s", resp.Status, bytes.TrimSpace(raw))
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("daemon returned %s: %s", resp.Status, bytes.TrimSpace(raw))
 	}
-	return nil
+	return raw, nil
 }
 
 func (c *Client) doDocument(req *http.Request, want int) (DocumentResult, error) {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -25,36 +24,27 @@ const maxTitleLen = 120
 // store.UpsertTranscript). The stored transcript, with its messages, is
 // returned.
 func (s *Service) IngestTranscript(path string) (domain.Transcript, error) {
-	// Confine ingest to .jsonl files beneath the configured projects directory:
-	// the daemon must never be coaxed into reading arbitrary files off disk.
-	resolved, err := s.resolveWithinProjects(path)
+	// Confine ingest to a .jsonl file within the pinned projects directory. The
+	// projectsRoot handle (opened once at construction) makes this TOCTOU-safe:
+	// neither the projects dir nor any symlink component can be swapped to
+	// escape it between check and open.
+	if s.projectsRoot == nil {
+		return domain.Transcript{}, errors.Join(domain.ErrInvalidTranscript,
+			fmt.Errorf("projects directory %q is unavailable", s.projectsDir))
+	}
+	rel, err := s.relWithinProjects(path)
 	if err != nil {
 		return domain.Transcript{}, err
 	}
-	if !strings.HasSuffix(resolved, ".jsonl") {
+	if !strings.HasSuffix(rel, ".jsonl") {
 		return domain.Transcript{}, errors.Join(domain.ErrInvalidTranscript,
 			fmt.Errorf("path %q is not a .jsonl file", path))
 	}
 
-	// Open through a rooted directory (os.OpenRoot) so no symlink component can
-	// escape the projects dir between validation and open (TOCTOU-safe). Require
-	// a regular file, verified on the opened handle.
-	projectsRoot, err := s.resolveProjectsDir()
+	f, err := s.projectsRoot.Open(rel)
 	if err != nil {
-		return domain.Transcript{}, errors.Join(domain.ErrInvalidTranscript, err)
-	}
-	rel, err := filepath.Rel(projectsRoot, resolved)
-	if err != nil {
-		return domain.Transcript{}, errors.Join(domain.ErrInvalidTranscript, err)
-	}
-	root, err := os.OpenRoot(projectsRoot)
-	if err != nil {
-		return domain.Transcript{}, fmt.Errorf("open projects root: %w", err)
-	}
-	defer root.Close()
-	f, err := root.Open(rel)
-	if err != nil {
-		return domain.Transcript{}, fmt.Errorf("open transcript: %w", err)
+		return domain.Transcript{}, errors.Join(domain.ErrInvalidTranscript,
+			fmt.Errorf("open transcript %q: %w", path, err))
 	}
 	defer f.Close()
 	info, err := f.Stat()
@@ -69,8 +59,8 @@ func (s *Service) IngestTranscript(path string) (domain.Transcript, error) {
 	now := time.Now().UTC()
 	t := domain.Transcript{
 		ID:         domain.NewID(),
-		SessionID:  sessionIDFromPath(resolved),
-		SourcePath: resolved,
+		SessionID:  sessionIDFromPath(rel),
+		SourcePath: filepath.Join(s.projectsDir, rel),
 		CreatedAt:  now,
 	}
 
@@ -147,25 +137,18 @@ func (s *Service) TranscriptsForIssue(issueID string) ([]domain.Transcript, erro
 // ~/.claude/projects; otherwise it scans the given project dir. Each file's
 // session_id, path, and ingested state is returned.
 func (s *Service) DiscoverTranscripts(dir string) ([]domain.DiscoveredTranscript, error) {
-	// Walk the symlink-resolved directory: WalkDir does not follow a root that
-	// is itself a symlink, so a symlinked projects dir must be resolved first.
-	var root string
-	if dir == "" {
-		resolved, err := s.resolveProjectsDir()
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, nil // no projects dir yet — nothing to discover
-			}
-			return nil, err
-		}
-		root = resolved
-	} else {
-		// A caller-supplied dir must live within the configured projects dir.
-		resolved, err := s.resolveWithinProjects(dir)
+	// Walk the pinned projects root (TOCTOU-safe). An empty dir scans the whole
+	// projects dir; a caller-supplied dir must live within it.
+	if s.projectsRoot == nil {
+		return nil, nil // no projects dir yet — nothing to discover
+	}
+	sub := "."
+	if dir != "" {
+		rel, err := s.relWithinProjects(dir)
 		if err != nil {
 			return nil, err
 		}
-		root = resolved
+		sub = filepath.ToSlash(rel)
 	}
 	ingested, err := s.store.IngestedSessionIDs()
 	if err != nil {
@@ -173,20 +156,20 @@ func (s *Service) DiscoverTranscripts(dir string) ([]domain.DiscoveredTranscript
 	}
 
 	var out []domain.DiscoveredTranscript
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	walkErr := fs.WalkDir(s.projectsRoot.FS(), sub, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) {
-				return nil // a missing projects dir is simply "nothing to discover"
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil // a missing subdir is simply "nothing to discover"
 			}
 			return err
 		}
 		if d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
 			return nil
 		}
-		sid := sessionIDFromPath(path)
+		sid := sessionIDFromPath(p)
 		out = append(out, domain.DiscoveredTranscript{
 			SessionID: sid,
-			Path:      path,
+			Path:      filepath.Join(s.projectsDir, filepath.FromSlash(p)),
 			Ingested:  ingested[sid],
 		})
 		return nil
@@ -203,41 +186,20 @@ func sessionIDFromPath(path string) string {
 	return strings.TrimSuffix(filepath.Base(path), ".jsonl")
 }
 
-// resolveProjectsDir returns the symlink-resolved, absolute projects directory.
-// It errors if that directory does not exist or is otherwise inaccessible.
-func (s *Service) resolveProjectsDir() (string, error) {
-	abs, err := filepath.Abs(s.projectsDir)
-	if err != nil {
-		return "", err
-	}
-	return filepath.EvalSymlinks(abs)
-}
-
-// resolveWithinProjects resolves path to its absolute, symlink-free form and
-// verifies it lies within the configured projects directory. It returns the
-// resolved path, or an ErrInvalidTranscript-wrapped error if the path escapes
-// the projects directory or cannot be resolved.
-func (s *Service) resolveWithinProjects(path string) (string, error) {
-	root, err := s.resolveProjectsDir()
-	if err != nil {
-		return "", errors.Join(domain.ErrInvalidTranscript,
-			fmt.Errorf("projects directory %q is not accessible: %w", s.projectsDir, err))
-	}
+// relWithinProjects returns path expressed relative to the projects directory,
+// wrapping ErrInvalidTranscript if it escapes that directory. It is a textual
+// containment check; the pinned projectsRoot enforces symlink safety at open.
+func (s *Service) relWithinProjects(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", errors.Join(domain.ErrInvalidTranscript, err)
 	}
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return "", errors.Join(domain.ErrInvalidTranscript,
-			fmt.Errorf("path %q is not accessible: %w", path, err))
-	}
-	rel, err := filepath.Rel(root, resolved)
+	rel, err := filepath.Rel(s.projectsDir, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", errors.Join(domain.ErrInvalidTranscript,
 			fmt.Errorf("path %q is outside the projects directory", path))
 	}
-	return resolved, nil
+	return rel, nil
 }
 
 func deriveTitle(text string) string {
