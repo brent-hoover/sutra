@@ -32,6 +32,7 @@ Feature: Daemon and clients
     When I run the CLI or TUI from another machine
     Then it operates against the daemon's data
 
+  @slice8
   Scenario: Manage issues in the TUI
     Given the TUI is open
     When I create an issue
