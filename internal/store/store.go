@@ -18,14 +18,11 @@ type Store struct {
 // the schema migrations.
 func Open(path string) (*Store, error) {
 	// Keep the DB and its -wal/-shm sidecars unreadable by other local users —
-	// otherwise they could read data straight from disk, bypassing the
-	// daemon's authentication. Secure the directory and file *before* SQLite
-	// opens them; MkdirAll does not tighten an already-existing directory, so
-	// chmod it explicitly.
-	// MkdirAll creates new directories as 0700 (no group/other bits) and leaves
-	// an existing directory's permissions untouched — so a pre-existing shared
-	// directory the user chose is respected. The DB file and its sidecars are
-	// 0600 below, so data stays private regardless of the directory's mode.
+	// otherwise they could read data straight from disk, bypassing the daemon's
+	// authentication. MkdirAll creates a new directory as 0700 (no group/other
+	// bits) and leaves an existing directory's permissions untouched, so a
+	// pre-existing shared directory the user chose is respected; the DB file and
+	// its sidecars are secured to 0600 below regardless of the directory's mode.
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("create db dir: %w", err)

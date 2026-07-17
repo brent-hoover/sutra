@@ -27,20 +27,18 @@ import (
 )
 
 type world struct {
-	dir         string
-	cfg         config.Config
-	verify      *service.Service // second handle for reading ledger state
-	serveCtx    context.Context
-	cancel      context.CancelFunc
-	serveCh     chan error // receives the serve command's exit error
-	serveExited bool       // set once the serve exit has been observed
-	serveErr    error      // the observed serve exit error, if any
-	subject     string
-	body        string
-	issue       domain.Issue
-	viewOut     string
-	err         error
-	envBackup   map[string]*string // original env values to restore in teardown
+	dir       string
+	cfg       config.Config
+	verify    *service.Service // second handle for reading ledger state
+	serveCtx  context.Context
+	cancel    context.CancelFunc
+	serveCh   chan error // receives the serve command's exit error
+	subject   string
+	body      string
+	issue     domain.Issue
+	viewOut   string
+	err       error
+	envBackup map[string]*string // original env values to restore in teardown
 }
 
 var managedEnvKeys = []string{"SUTRA_LISTEN", "SUTRA_DB", "SUTRA_HOST", "SUTRA_TOKEN"}
@@ -63,10 +61,6 @@ func (w *world) setup() error {
 	}
 	w.dir = dir
 
-	addr, err := freeLoopbackAddr()
-	if err != nil {
-		return err
-	}
 	// Snapshot then override the environment so config.Load is exercised and
 	// prior values are restored in teardown (no cross-test order dependence).
 	w.envBackup = make(map[string]*string, len(managedEnvKeys))
@@ -78,49 +72,75 @@ func (w *world) setup() error {
 			w.envBackup[k] = nil
 		}
 	}
-	os.Setenv("SUTRA_LISTEN", addr)
 	os.Setenv("SUTRA_DB", filepath.Join(dir, "test.db"))
-	os.Setenv("SUTRA_HOST", "http://"+addr)
 	os.Unsetenv("SUTRA_TOKEN")
-	w.cfg = config.Load()
 
-	// Start the daemon via the real Cobra `serve` command.
-	w.serveCtx, w.cancel = context.WithCancel(context.Background())
-	w.serveCh = make(chan error, 1)
-	go func() {
-		root := cli.NewRoot(w.cfg)
-		root.SetArgs([]string{"serve"})
-		root.SetOut(io.Discard)
-		root.SetErr(io.Discard)
-		w.serveCh <- root.ExecuteContext(w.serveCtx)
-	}()
-	if err := w.waitListening(addr); err != nil {
-		return err
+	// Start the daemon via the real Cobra `serve` command, retrying to tolerate
+	// the rare race where the chosen ephemeral port is claimed by another
+	// process between selection and the daemon's bind.
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		addr, err := freeLoopbackAddr()
+		if err != nil {
+			return err
+		}
+		os.Setenv("SUTRA_LISTEN", addr)
+		os.Setenv("SUTRA_HOST", "http://"+addr)
+		w.cfg = config.Load()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		ch := make(chan error, 1)
+		go func(cfg config.Config) {
+			root := cli.NewRoot(cfg)
+			root.SetArgs([]string{"serve"})
+			root.SetOut(io.Discard)
+			root.SetErr(io.Discard)
+			ch <- root.ExecuteContext(ctx)
+		}(w.cfg)
+
+		exited, werr := waitListening(addr, ch)
+		if werr == nil {
+			w.serveCtx, w.cancel, w.serveCh = ctx, cancel, ch
+			break
+		}
+		// Failed attempt: stop this daemon and drain its exit before retrying.
+		cancel()
+		if !exited {
+			select {
+			case <-ch:
+			case <-time.After(2 * time.Second):
+			}
+		}
+		lastErr = werr
+	}
+	if w.cancel == nil {
+		return fmt.Errorf("could not start daemon: %w", lastErr)
 	}
 
-	if w.verify, err = service.New(config.Config{DBPath: w.cfg.DBPath}); err != nil {
-		return err
+	var err2 error
+	if w.verify, err2 = service.New(config.Config{DBPath: w.cfg.DBPath}); err2 != nil {
+		return err2
 	}
 	return nil
 }
 
-func (w *world) waitListening(addr string) error {
+// waitListening blocks until the daemon at addr accepts connections. It returns
+// exited=true if the serve command exited (via ch) before it began listening.
+func waitListening(addr string, ch chan error) (exited bool, err error) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		select {
-		case err := <-w.serveCh:
-			w.serveExited, w.serveErr = true, err
-			return fmt.Errorf("serve command exited before listening: %w", err)
+		case e := <-ch:
+			return true, fmt.Errorf("serve command exited before listening: %w", e)
 		default:
 		}
-		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
-		if err == nil {
+		if conn, e := net.DialTimeout("tcp", addr, 50*time.Millisecond); e == nil {
 			conn.Close()
-			return nil
+			return false, nil
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return fmt.Errorf("daemon did not start listening on %s", addr)
+	return false, fmt.Errorf("daemon did not start listening on %s", addr)
 }
 
 func (w *world) teardown() error {
@@ -136,23 +156,14 @@ func (w *world) teardown() error {
 	shutdownConfirmed := w.cancel == nil
 	if w.cancel != nil {
 		w.cancel()
-		switch {
-		case w.serveExited:
-			// The daemon already exited (observed during setup); don't block.
-			if w.serveErr != nil {
-				errs = append(errs, fmt.Errorf("serve exited with error: %w", w.serveErr))
+		select {
+		case serveErr := <-w.serveCh:
+			if serveErr != nil {
+				errs = append(errs, fmt.Errorf("serve exited with error: %w", serveErr))
 			}
 			shutdownConfirmed = true
-		default:
-			select {
-			case serveErr := <-w.serveCh:
-				if serveErr != nil {
-					errs = append(errs, fmt.Errorf("serve exited with error: %w", serveErr))
-				}
-				shutdownConfirmed = true
-			case <-time.After(5 * time.Second):
-				errs = append(errs, fmt.Errorf("timed out waiting for daemon to shut down"))
-			}
+		case <-time.After(5 * time.Second):
+			errs = append(errs, fmt.Errorf("timed out waiting for daemon to shut down"))
 		}
 	}
 	if w.verify != nil {
