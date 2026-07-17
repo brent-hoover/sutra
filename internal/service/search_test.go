@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/brent-hoover/sutra/internal/domain"
+	"github.com/brent-hoover/sutra/internal/service"
 )
 
 // messageLines returns a transcript whose seq==2 message contains term.
@@ -294,6 +295,96 @@ func TestSearchValidation(t *testing.T) {
 	if _, err := svc.Search(domain.SearchQuery{Text: "x", Kind: domain.SearchKind("bogus")}); !errors.Is(err, domain.ErrInvalidSearch) {
 		t.Errorf("bad kind: err = %v, want ErrInvalidSearch", err)
 	}
+}
+
+// TestSearchIndexSyncOnDocumentWrites: the FTS index tracks document content
+// through update and removal (exercising the update/delete triggers).
+func TestSearchIndexSyncOnDocumentWrites(t *testing.T) {
+	svc := newService(t, t.TempDir())
+	const term = "mimsyborogove"
+
+	iss, err := svc.CreateIssue("host", "no term")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	doc, err := svc.AttachDocument(iss.ID, domain.DocPlan, "doc", "content without the term")
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	if hits := searchDocs(t, svc, term); len(hits) != 0 {
+		t.Fatalf("term found before it was added, got %d hits", len(hits))
+	}
+
+	// Update to add the term — the AU trigger must re-index.
+	if _, err := svc.UpdateDocument(doc.ID, "now the "+term+" is present"); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if hits := searchDocs(t, svc, term); len(hits) != 1 {
+		t.Fatalf("after update: got %d document hits, want 1", len(hits))
+	}
+
+	// Update to drop the term — the AU trigger must remove the stale entry.
+	if _, err := svc.UpdateDocument(doc.ID, "the term is gone again"); err != nil {
+		t.Fatalf("update 2: %v", err)
+	}
+	if hits := searchDocs(t, svc, term); len(hits) != 0 {
+		t.Fatalf("after removing term via update: got %d hits, want 0", len(hits))
+	}
+
+	// Re-add then remove the document — the AD trigger must drop the entry.
+	if _, err := svc.UpdateDocument(doc.ID, "the "+term+" returns"); err != nil {
+		t.Fatalf("update 3: %v", err)
+	}
+	if err := svc.RemoveDocument(doc.ID); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if hits := searchDocs(t, svc, term); len(hits) != 0 {
+		t.Fatalf("after remove: got %d hits, want 0", len(hits))
+	}
+}
+
+// TestSearchIndexSyncOnReingestPrune: re-ingesting a shorter transcript prunes
+// the dropped message from the index (exercising the message delete trigger via
+// the prune path).
+func TestSearchIndexSyncOnReingestPrune(t *testing.T) {
+	projectsDir := t.TempDir()
+	svc := newService(t, projectsDir)
+	const term = "outgrabe"
+
+	dir := filepath.Join(projectsDir, "-Users-me-prune")
+	path := writeSession(t, dir, "prune-session", messageLines(term))
+	if _, err := svc.IngestTranscript(path); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if hits := searchKind(t, svc, term, domain.KindMessage); len(hits) != 1 {
+		t.Fatalf("before re-ingest: got %d message hits, want 1", len(hits))
+	}
+
+	// Re-ingest a shorter transcript that drops the message carrying the term.
+	shorter := []string{
+		`{"type":"user","message":{"role":"user","content":"only message"},"timestamp":"2026-07-16T10:00:00Z"}`,
+	}
+	writeSession(t, dir, "prune-session", shorter)
+	if _, err := svc.IngestTranscript(path); err != nil {
+		t.Fatalf("re-ingest: %v", err)
+	}
+	if hits := searchKind(t, svc, term, domain.KindMessage); len(hits) != 0 {
+		t.Fatalf("after prune: got %d message hits, want 0", len(hits))
+	}
+}
+
+func searchDocs(t *testing.T, svc *service.Service, term string) []domain.SearchHit {
+	t.Helper()
+	return searchKind(t, svc, term, domain.KindDocument)
+}
+
+func searchKind(t *testing.T, svc *service.Service, term string, kind domain.SearchKind) []domain.SearchHit {
+	t.Helper()
+	res, err := svc.Search(domain.SearchQuery{Text: term, Kind: kind})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	return res.Hits
 }
 
 // TestSearchNoResults returns an empty (non-nil) hit list.

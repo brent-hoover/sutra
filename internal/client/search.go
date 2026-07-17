@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"github.com/brent-hoover/sutra/internal/domain"
 )
@@ -16,8 +17,9 @@ type SearchResult struct {
 }
 
 // Search runs a full-text search via the daemon. kind and issue are optional
-// scopes; empty values are omitted.
-func (c *Client) Search(ctx context.Context, text, kind, issue string) (SearchResult, error) {
+// scopes; empty values are omitted. limit bounds the result count (0 = the
+// daemon's default cap).
+func (c *Client) Search(ctx context.Context, text, kind, issue string, limit int) (SearchResult, error) {
 	q := url.Values{}
 	q.Set("q", text)
 	if kind != "" {
@@ -25,6 +27,9 @@ func (c *Client) Search(ctx context.Context, text, kind, issue string) (SearchRe
 	}
 	if issue != "" {
 		q.Set("issue", issue)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
 	}
 	req, err := c.newRequest(ctx, http.MethodGet, "/search?"+q.Encode(), nil)
 	if err != nil {

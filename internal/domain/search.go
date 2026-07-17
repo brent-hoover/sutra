@@ -26,11 +26,13 @@ func (k SearchKind) Valid() bool {
 
 // SearchQuery scopes a full-text search. Text is the FTS query; Kind restricts
 // to one source entity ("" = all); Issue restricts to a single issue's content
-// ("" = all issues).
+// ("" = all issues); Limit bounds the number of hits (0 = the store's default
+// cap, which also caps any larger request).
 type SearchQuery struct {
 	Text  string
 	Kind  SearchKind
 	Issue string
+	Limit int
 }
 
 // SearchHit is one ranked result. Exactly one of Issue/Document/Message is set,

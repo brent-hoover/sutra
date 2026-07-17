@@ -13,12 +13,13 @@ import (
 
 func searchCmd(cfg config.Config) *cobra.Command {
 	var kind, issue string
+	var limit int
 	cmd := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Full-text search across issues, documents, and transcript messages",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := client.New(cfg).Search(cmd.Context(), args[0], kind, issue)
+			res, err := client.New(cfg).Search(cmd.Context(), args[0], kind, issue, limit)
 			if err != nil {
 				return err
 			}
@@ -31,6 +32,7 @@ func searchCmd(cfg config.Config) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&kind, "kind", "", "restrict to a kind: issue|document|message")
 	cmd.Flags().StringVar(&issue, "issue", "", "restrict to a single issue id")
+	cmd.Flags().IntVar(&limit, "limit", 0, "maximum number of hits (0 = daemon default)")
 	return cmd
 }
 

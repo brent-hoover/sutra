@@ -135,7 +135,7 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 // GetTranscript returns the transcript with the given id and its messages in
 // seq order, or ErrNotFound.
 func (s *Store) GetTranscript(id string) (domain.Transcript, error) {
-	t, err := s.scanTranscript(s.db.QueryRow(
+	t, err := scanTranscript(s.db.QueryRow(
 		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at
 		 FROM transcripts WHERE id = ?`, id))
 	if err != nil {
@@ -224,7 +224,7 @@ func (s *Store) TranscriptsForIssue(issueID string) ([]domain.Transcript, error)
 
 	var out []domain.Transcript
 	for rows.Next() {
-		t, err := s.scanTranscript(rows)
+		t, err := scanTranscript(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -252,7 +252,7 @@ func (s *Store) IngestedSessionIDs() (map[string]bool, error) {
 	return set, rows.Err()
 }
 
-func (s *Store) scanTranscript(row rowScanner) (domain.Transcript, error) {
+func scanTranscript(row rowScanner) (domain.Transcript, error) {
 	var (
 		t                     domain.Transcript
 		issueID               sql.NullString

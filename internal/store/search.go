@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,18 @@ import (
 // contextWindow is how many messages on each side of a matching message are
 // returned as adjacent context for agent synthesis.
 const contextWindow = 2
+
+// maxResults bounds a single search response (and thus the per-hit hydration
+// work) so a common term over a large archive cannot produce an unbounded
+// result set. A caller may request fewer via SearchQuery.Limit, never more.
+const maxResults = 100
+
+// querier is satisfied by both *sql.DB and *sql.Tx, so hydration helpers can
+// run against a shared read transaction for a consistent snapshot.
+type querier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
 
 // migrateSearch creates the FTS5 index and the triggers that keep it in sync
 // with writes to issues, documents, and messages.
@@ -68,24 +81,38 @@ END;`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate search: %w", err)
 	}
+	return s.backfillSearch()
+}
 
-	// Backfill any rows written before the index/triggers existed (e.g. a DB
-	// created by an earlier version). Only runs when the index is empty, so it
-	// is a one-time cost and never duplicates trigger-maintained rows.
+// backfillSearch populates the index from rows written before the triggers
+// existed (e.g. a DB created by an earlier version). It runs in one transaction
+// and only when the index is empty, so it is atomic — a mid-backfill failure
+// rolls back entirely and is retried on the next open, never leaving some entity
+// kinds permanently unindexed — and never duplicates trigger-maintained rows.
+func (s *Store) backfillSearch() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	var n int
-	if err := s.db.QueryRow(`SELECT count(*) FROM search_fts`).Scan(&n); err != nil {
+	if err := tx.QueryRow(`SELECT count(*) FROM search_fts`).Scan(&n); err != nil {
 		return fmt.Errorf("count search index: %w", err)
 	}
-	if n == 0 {
-		const backfill = `
-INSERT INTO search_fts(kind, ref_id, text) SELECT 'issue', id, subject || ' ' || body FROM issues;
-INSERT INTO search_fts(kind, ref_id, text) SELECT 'document', id, content FROM documents;
-INSERT INTO search_fts(kind, ref_id, text) SELECT 'message', id, text FROM messages;`
-		if _, err := s.db.Exec(backfill); err != nil {
+	if n > 0 {
+		return nil
+	}
+	for _, stmt := range []string{
+		`INSERT INTO search_fts(kind, ref_id, text) SELECT 'issue', id, subject || ' ' || body FROM issues`,
+		`INSERT INTO search_fts(kind, ref_id, text) SELECT 'document', id, content FROM documents`,
+		`INSERT INTO search_fts(kind, ref_id, text) SELECT 'message', id, text FROM messages`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("backfill search index: %w", err)
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // searchRef is a lightweight FTS match: which source row, and its relevance.
@@ -97,7 +124,12 @@ type searchRef struct {
 
 // Search runs a full-text query and returns ranked, hydrated hits.
 //
-// Soft-delete exclusion rule (applied here, at query time):
+// The whole operation runs inside one deferred read transaction so matching and
+// hydration observe a single consistent snapshot: a concurrent update, soft
+// delete, or transcript re-ingest between the match and hydration can neither
+// surface stale content nor fail hydration with ErrNotFound.
+//
+// Soft-delete exclusion rule (applied at match time):
 //   - an issue hit is excluded if the issue is soft-deleted;
 //   - a document hit is excluded if its owning issue is soft-deleted;
 //   - a message hit is excluded if its transcript is linked to a soft-deleted
@@ -105,15 +137,46 @@ type searchRef struct {
 //     content is not tied to any deleted issue.
 //
 // q.Kind (if set) restricts to one kind; q.Issue (if set) restricts to a single
-// issue's content across all kinds.
+// issue's content across all kinds; q.Limit bounds the result count (0 or above
+// maxResults uses maxResults).
 func (s *Store) Search(q domain.SearchQuery) ([]domain.SearchHit, error) {
 	match := ftsQuery(q.Text)
 	if match == "" {
 		return nil, nil
 	}
+	limit := q.Limit
+	if limit <= 0 || limit > maxResults {
+		limit = maxResults
+	}
 
-	// One pass over the FTS index, joined to the base tables so soft-deleted
-	// content is filtered and (optionally) scoped, ordered by bm25 relevance.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	refs, err := searchRefs(tx, match, q, limit)
+	if err != nil {
+		return nil, err
+	}
+	hits := make([]domain.SearchHit, 0, len(refs))
+	for _, r := range refs {
+		hit, err := hydrateHit(tx, r)
+		if err != nil {
+			return nil, err
+		}
+		hits = append(hits, hit)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return hits, nil
+}
+
+// searchRefs runs the FTS match, filters soft-deleted content and applies scope,
+// and returns the ranked references. Rows are fully drained and closed before
+// returning so hydration can reuse the single connection.
+func searchRefs(q querier, match string, sq domain.SearchQuery, limit int) ([]searchRef, error) {
 	query := `
 SELECT f.kind, f.ref_id, bm25(search_fts) AS rank
 FROM search_fts f
@@ -130,69 +193,55 @@ WHERE search_fts MATCH ?
      OR (f.kind = 'message'  AND (tr.issue_id IS NULL OR mi.deleted_at IS NULL))
   )`
 	args := []any{match}
-	if q.Kind != "" {
+	if sq.Kind != "" {
 		query += " AND f.kind = ?"
-		args = append(args, string(q.Kind))
+		args = append(args, string(sq.Kind))
 	}
-	if q.Issue != "" {
+	if sq.Issue != "" {
 		query += ` AND (
         (f.kind = 'issue'    AND f.ref_id = ?)
      OR (f.kind = 'document' AND d.issue_id = ?)
      OR (f.kind = 'message'  AND tr.issue_id = ?)
   )`
-		args = append(args, q.Issue, q.Issue, q.Issue)
+		args = append(args, sq.Issue, sq.Issue, sq.Issue)
 	}
-	query += " ORDER BY rank"
+	query += " ORDER BY rank LIMIT ?"
+	args = append(args, limit)
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := q.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search query: %w", err)
 	}
-	// Collect all refs before hydrating: the single-connection pool means a
-	// follow-up query while these rows are open would deadlock.
+	defer rows.Close()
+
 	var refs []searchRef
 	for rows.Next() {
 		var r searchRef
 		if err := rows.Scan(&r.kind, &r.refID, &r.rank); err != nil {
-			rows.Close()
 			return nil, fmt.Errorf("scan search row: %w", err)
 		}
 		refs = append(refs, r)
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	rows.Close()
-
-	hits := make([]domain.SearchHit, 0, len(refs))
-	for _, r := range refs {
-		hit, err := s.hydrateHit(r)
-		if err != nil {
-			return nil, err
-		}
-		hits = append(hits, hit)
-	}
-	return hits, nil
+	return refs, rows.Err()
 }
 
-func (s *Store) hydrateHit(r searchRef) (domain.SearchHit, error) {
+func hydrateHit(q querier, r searchRef) (domain.SearchHit, error) {
 	hit := domain.SearchHit{Kind: domain.SearchKind(r.kind), Rank: r.rank}
 	switch domain.SearchKind(r.kind) {
 	case domain.KindIssue:
-		issue, err := s.GetIssue(r.refID)
+		issue, err := issueByID(q, r.refID)
 		if err != nil {
 			return domain.SearchHit{}, fmt.Errorf("hydrate issue hit: %w", err)
 		}
 		hit.Issue = &issue
 	case domain.KindDocument:
-		doc, err := s.GetDocument(r.refID)
+		doc, err := scanDocument(q.QueryRow(`SELECT `+documentColumns+` FROM documents WHERE id = ?`, r.refID))
 		if err != nil {
 			return domain.SearchHit{}, fmt.Errorf("hydrate document hit: %w", err)
 		}
 		hit.Document = &doc
 	case domain.KindMessage:
-		if err := s.hydrateMessageHit(&hit, r.refID); err != nil {
+		if err := hydrateMessageHit(q, &hit, r.refID); err != nil {
 			return domain.SearchHit{}, err
 		}
 	default:
@@ -201,28 +250,28 @@ func (s *Store) hydrateHit(r searchRef) (domain.SearchHit, error) {
 	return hit, nil
 }
 
-func (s *Store) hydrateMessageHit(hit *domain.SearchHit, messageID string) error {
-	msg, err := s.getMessage(messageID)
+func hydrateMessageHit(q querier, hit *domain.SearchHit, messageID string) error {
+	msg, err := getMessage(q, messageID)
 	if err != nil {
 		return fmt.Errorf("hydrate message hit: %w", err)
 	}
 	hit.Message = &msg
 
-	tr, err := s.transcriptMeta(msg.TranscriptID)
+	tr, err := transcriptMeta(q, msg.TranscriptID)
 	if err != nil {
 		return fmt.Errorf("hydrate message transcript: %w", err)
 	}
 	hit.Transcript = &tr
 
 	if tr.IssueID != nil {
-		linked, err := s.GetIssue(*tr.IssueID)
+		linked, err := issueByID(q, *tr.IssueID)
 		if err != nil {
 			return fmt.Errorf("hydrate linked issue: %w", err)
 		}
 		hit.LinkedIssue = &linked
 	}
 
-	ctx, err := s.messagesAround(msg.TranscriptID, msg.Seq, contextWindow)
+	ctx, err := messagesAround(q, msg.TranscriptID, msg.Seq, contextWindow)
 	if err != nil {
 		return fmt.Errorf("hydrate message context: %w", err)
 	}
@@ -230,9 +279,22 @@ func (s *Store) hydrateMessageHit(hit *domain.SearchHit, messageID string) error
 	return nil
 }
 
+// issueByID reads one issue against the given querier, mapping absence to
+// ErrNotFound.
+func issueByID(q querier, id string) (domain.Issue, error) {
+	issue, err := scanIssue(q.QueryRow(`SELECT `+issueColumns+` FROM issues WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Issue{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.Issue{}, fmt.Errorf("get issue: %w", err)
+	}
+	return issue, nil
+}
+
 // getMessage returns a single message by id.
-func (s *Store) getMessage(id string) (domain.Message, error) {
-	rows, err := s.db.Query(
+func getMessage(q querier, id string) (domain.Message, error) {
+	rows, err := q.Query(
 		`SELECT id, transcript_id, seq, role, text, raw, at FROM messages WHERE id = ?`, id)
 	if err != nil {
 		return domain.Message{}, fmt.Errorf("query message: %w", err)
@@ -249,8 +311,8 @@ func (s *Store) getMessage(id string) (domain.Message, error) {
 }
 
 // transcriptMeta returns a transcript without its messages.
-func (s *Store) transcriptMeta(id string) (domain.Transcript, error) {
-	return s.scanTranscript(s.db.QueryRow(
+func transcriptMeta(q querier, id string) (domain.Transcript, error) {
+	return scanTranscript(q.QueryRow(
 		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at
 		 FROM transcripts WHERE id = ?`, id))
 }
@@ -258,8 +320,8 @@ func (s *Store) transcriptMeta(id string) (domain.Transcript, error) {
 // messagesAround returns the messages within +/-window seq positions of seq in
 // the given transcript, excluding the message at seq itself (that message is the
 // hit). Results are in seq order.
-func (s *Store) messagesAround(transcriptID string, seq, window int) ([]domain.Message, error) {
-	rows, err := s.db.Query(
+func messagesAround(q querier, transcriptID string, seq, window int) ([]domain.Message, error) {
+	rows, err := q.Query(
 		`SELECT id, transcript_id, seq, role, text, raw, at
 		 FROM messages
 		 WHERE transcript_id = ? AND seq BETWEEN ? AND ? AND seq != ?

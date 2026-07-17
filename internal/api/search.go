@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/brent-hoover/sutra/internal/domain"
 )
@@ -21,10 +22,20 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid kind scope: "+string(kind))
 		return
 	}
+	var limit int
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid limit: "+v)
+			return
+		}
+		limit = n
+	}
 	results, err := s.svc.Search(domain.SearchQuery{
 		Text:  text,
 		Kind:  kind,
 		Issue: q.Get("issue"),
+		Limit: limit,
 	})
 	if errors.Is(err, domain.ErrInvalidSearch) {
 		writeError(w, http.StatusBadRequest, err.Error())
