@@ -309,6 +309,11 @@ func issueByID(q querier, id string) (domain.Issue, error) {
 	if err != nil {
 		return domain.Issue{}, fmt.Errorf("get issue: %w", err)
 	}
+	// Hydrate labels so search issue/linked-issue hits carry the same derived
+	// labels projection as GetIssue and ListIssues.
+	if issue.Labels, err = labelsFor(q, id); err != nil {
+		return domain.Issue{}, err
+	}
 	return issue, nil
 }
 

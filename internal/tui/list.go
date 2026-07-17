@@ -76,14 +76,18 @@ func (m *Model) listView() string {
 	return b.String()
 }
 
+// footerRows is the maximum height of the footer: a blank line, an optional
+// status/error line, and the help line.
+const footerRows = 3
+
 // listWindow returns the [start,end) range of issues to render so the cursor is
 // always visible within the terminal height. With no known height (e.g. before
 // the first WindowSizeMsg), it renders the whole list.
 func (m *Model) listWindow() (start, end int) {
 	n := len(m.issues)
-	// Reserve rows for the title, the footer (help + optional status/error), and
-	// the up/down "more" indicators.
-	rows := m.height - 5
+	// Reserve rows for the title (1), the up/down "more" indicators (2), and the
+	// footer (footerRows).
+	rows := m.height - footerRows - 3
 	if m.height <= 0 || rows >= n {
 		return 0, n
 	}

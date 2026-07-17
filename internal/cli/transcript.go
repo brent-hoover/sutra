@@ -170,8 +170,10 @@ func outputTranscriptDetail(cmd *cobra.Command, res client.TranscriptResult) err
 // renderMessage reconstructs a message's displayed text, preferring the
 // extracted text and falling back to the raw JSON line.
 func renderMessage(m domain.Message) string {
+	// Stored message content is untrusted — strip terminal control sequences
+	// before it reaches the terminal.
 	if m.Text != "" {
-		return m.Text
+		return clean(m.Text)
 	}
-	return m.Raw
+	return clean(m.Raw)
 }

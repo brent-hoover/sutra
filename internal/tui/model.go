@@ -223,7 +223,9 @@ func (m *Model) bumpGen() int {
 }
 
 func (m *Model) resizeViewport() {
-	h := m.height - 2
+	// Reserve rows for the footer, which is up to 3 lines (blank + status/error
+	// + help) when a status or error message is present.
+	h := m.height - footerRows
 	if h < 1 {
 		h = 1
 	}
