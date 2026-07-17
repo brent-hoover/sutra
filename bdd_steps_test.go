@@ -9,6 +9,7 @@ package main_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -104,23 +105,41 @@ func (w *world) waitListening(addr string) error {
 	return fmt.Errorf("daemon did not start listening on %s", addr)
 }
 
-func (w *world) teardown() {
-	if w.cancel != nil {
-		w.cancel()
-		select {
-		case <-w.serveCh: // wait for the server to exit before removing files
-		case <-time.After(5 * time.Second):
-		}
-	}
-	if w.verify != nil {
-		w.verify.Close()
-	}
+func (w *world) teardown() error {
 	os.Unsetenv("SUTRA_LISTEN")
 	os.Unsetenv("SUTRA_DB")
 	os.Unsetenv("SUTRA_HOST")
-	if w.dir != "" {
-		os.RemoveAll(w.dir)
+
+	var errs []error
+	shutdownConfirmed := w.cancel == nil
+	if w.cancel != nil {
+		w.cancel()
+		select {
+		case serveErr := <-w.serveCh:
+			if serveErr != nil {
+				errs = append(errs, fmt.Errorf("serve exited with error: %w", serveErr))
+			}
+			shutdownConfirmed = true
+		case <-time.After(5 * time.Second):
+			errs = append(errs, fmt.Errorf("timed out waiting for daemon to shut down"))
+		}
 	}
+	if w.verify != nil {
+		if err := w.verify.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close verify handle: %w", err))
+		}
+	}
+	// Only remove the DB directory once the daemon has confirmed it stopped.
+	if w.dir != "" {
+		if shutdownConfirmed {
+			if err := os.RemoveAll(w.dir); err != nil {
+				errs = append(errs, fmt.Errorf("remove temp dir: %w", err))
+			}
+		} else {
+			errs = append(errs, fmt.Errorf("left %s in place: shutdown unconfirmed", w.dir))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // runCLI runs the real root command with args and returns its stdout.
@@ -149,8 +168,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		return ctx, w.setup()
 	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
-		w.teardown()
-		return ctx, nil
+		return ctx, w.teardown()
 	})
 
 	// Create an issue
