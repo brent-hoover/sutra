@@ -44,6 +44,7 @@ func (m *Model) openCreateForm() {
 		title:   "New issue",
 		fields:  []field{{label: "subject"}, {label: "body"}},
 	}
+	m.nextDetailSeq() // invalidate any in-flight detail load
 	m.mode = formMode
 }
 
@@ -54,6 +55,7 @@ func (m *Model) openChildForm(parent domain.Issue) {
 		fields:   []field{{label: "subject"}, {label: "body"}},
 		parentID: parent.ID,
 	}
+	m.nextDetailSeq() // invalidate any in-flight detail load
 	m.mode = formMode
 }
 
@@ -69,6 +71,7 @@ func (m *Model) openEditForm(issue domain.Issue) {
 			{label: "owner", placeholder: issue.Owner},
 		},
 	}
+	m.nextDetailSeq() // invalidate any in-flight detail load
 	m.mode = formMode
 }
 
@@ -79,6 +82,7 @@ func (m *Model) openCommentForm(issueID string) {
 		targetID: issueID,
 		fields:   []field{{label: "body"}, {label: "author"}},
 	}
+	m.nextDetailSeq() // invalidate any in-flight detail load
 	m.mode = formMode
 }
 
@@ -145,22 +149,28 @@ func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 	case childForm:
 		return m, m.createIssueCmd(m.fieldValue("subject"), m.fieldValue("body"), m.form.parentID)
 	case editForm:
-		fields := map[string]string{}
-		for _, f := range m.form.fields {
-			if !f.edited {
-				continue // untouched: leave unchanged
-			}
-			// owner is free text and may be cleared; the enum fields have no
-			// valid empty value, so an edited-but-empty enum is left unchanged.
-			if f.label == "owner" || f.value != "" {
-				fields[f.label] = f.value
-			}
-		}
-		return m, m.updateIssueCmd(m.form.targetID, fields)
+		return m, m.updateIssueCmd(m.form.targetID, m.editFields())
 	case commentForm:
 		return m, m.addCommentCmd(m.form.targetID, m.fieldValue("author"), m.fieldValue("body"))
 	}
 	return m, nil
+}
+
+// editFields collects the changes from an edit form. An untouched field is
+// left unchanged; owner is free text and may be cleared (edited to empty),
+// while the enum fields have no valid empty value so an edited-but-empty enum
+// is left unchanged.
+func (m *Model) editFields() map[string]string {
+	fields := map[string]string{}
+	for _, f := range m.form.fields {
+		if !f.edited {
+			continue
+		}
+		if f.label == "owner" || f.value != "" {
+			fields[f.label] = f.value
+		}
+	}
+	return fields
 }
 
 // formView renders the active form.

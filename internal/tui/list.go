@@ -25,7 +25,7 @@ func (m *Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.loadIssuesCmd()
 	case "enter":
 		if len(m.issues) > 0 {
-			return m, m.loadDetailCmd(m.issues[m.cursor].ID)
+			return m, m.loadDetailCmd(m.issues[m.cursor].ID, m.nextDetailSeq())
 		}
 	case "n":
 		m.openCreateForm()

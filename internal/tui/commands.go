@@ -27,6 +27,7 @@ type issueUpdatedMsg struct {
 }
 
 type detailLoadedMsg struct {
+	seq    int // request generation; a stale response (seq != model's) is ignored
 	detail issueDetail
 	err    error
 }
@@ -70,31 +71,32 @@ func (m *Model) updateIssueCmd(id string, fields map[string]string) tea.Cmd {
 }
 
 // loadDetailCmd fetches an issue with its documents, comments, and linked
-// transcripts.
-func (m *Model) loadDetailCmd(id string) tea.Cmd {
+// transcripts. seq tags the request so the model can drop a stale response
+// (e.g. one that arrives after the user has navigated elsewhere).
+func (m *Model) loadDetailCmd(id string, seq int) tea.Cmd {
 	ctx, c := m.ctx, m.client
 	return func() tea.Msg {
 		ir, err := c.GetIssue(ctx, id)
 		if err != nil {
-			return detailLoadedMsg{err: err}
+			return detailLoadedMsg{seq: seq, err: err}
 		}
 		d := issueDetail{issue: ir.Issue}
 		dr, err := c.ListDocuments(ctx, id)
 		if err != nil {
-			return detailLoadedMsg{err: err}
+			return detailLoadedMsg{seq: seq, err: err}
 		}
 		d.documents = dr.Documents
 		cr, err := c.ListComments(ctx, id)
 		if err != nil {
-			return detailLoadedMsg{err: err}
+			return detailLoadedMsg{seq: seq, err: err}
 		}
 		d.comments = cr.Comments
 		tr, err := c.TranscriptsForIssue(ctx, id)
 		if err != nil {
-			return detailLoadedMsg{err: err}
+			return detailLoadedMsg{seq: seq, err: err}
 		}
 		d.transcripts = tr.Transcripts
-		return detailLoadedMsg{detail: d}
+		return detailLoadedMsg{seq: seq, detail: d}
 	}
 }
 

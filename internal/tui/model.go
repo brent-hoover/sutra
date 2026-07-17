@@ -40,9 +40,10 @@ type Model struct {
 	issues []domain.Issue
 	cursor int
 
-	detail   *issueDetail
-	viewport viewport.Model
-	vpReady  bool
+	detail    *issueDetail
+	viewport  viewport.Model
+	vpReady   bool
+	detailSeq int // generation for detail loads; stale responses are dropped
 
 	form       form
 	submitting bool // a form command is in flight; ignore repeat submits
@@ -109,7 +110,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "updated " + msg.issue.ID
 			if m.detail != nil && m.detail.issue.ID == msg.issue.ID {
 				m.mode = detailMode
-				return m, m.loadDetailCmd(msg.issue.ID)
+				return m, m.loadDetailCmd(msg.issue.ID, m.nextDetailSeq())
 			}
 			m.mode = listMode
 			return m, m.loadIssuesCmd()
@@ -117,12 +118,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case detailLoadedMsg:
+		if msg.seq != m.detailSeq {
+			return m, nil // stale: the user has navigated since this load began
+		}
 		m.err = msg.err
 		if msg.err == nil {
 			d := msg.detail
 			m.detail = &d
 			m.mode = detailMode
 			m.setDetailContent()
+			if m.vpReady {
+				m.viewport.GotoTop() // start a freshly opened issue at the top
+			}
 		}
 		return m, nil
 
@@ -134,7 +141,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "commented on " + id
 			if m.detail != nil && m.detail.issue.ID == id {
 				m.mode = detailMode
-				return m, m.loadDetailCmd(id) // re-fetch so the new comment shows
+				return m, m.loadDetailCmd(id, m.nextDetailSeq()) // re-fetch so the new comment shows
 			}
 		}
 		return m, nil
@@ -174,6 +181,14 @@ func (m *Model) View() string {
 	default:
 		return m.listView()
 	}
+}
+
+// nextDetailSeq advances and returns the detail-load generation. Any in-flight
+// detail load tagged with an older generation is dropped when its response
+// arrives, so navigating away cannot be clobbered by a late response.
+func (m *Model) nextDetailSeq() int {
+	m.detailSeq++
+	return m.detailSeq
 }
 
 func (m *Model) resizeViewport() {
