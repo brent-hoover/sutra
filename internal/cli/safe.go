@@ -25,3 +25,18 @@ func clean(s string) string {
 	}
 	return b.String()
 }
+
+// cleanLine is clean for single-line fields: it also folds newlines/tabs into
+// spaces so a stored value cannot break the row/label layout.
+func cleanLine(s string) string {
+	return strings.NewReplacer("\n", " ", "\t", " ", "\r", " ").Replace(clean(s))
+}
+
+// cleanLabels sanitizes each label for single-line display.
+func cleanLabels(labels []string) []string {
+	out := make([]string, len(labels))
+	for i, l := range labels {
+		out[i] = cleanLine(l)
+	}
+	return out
+}

@@ -130,7 +130,7 @@ func docOutput(cmd *cobra.Command, res client.DocumentResult) error {
 		return err
 	}
 	d := res.Document
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t[%s]\t%s\n", d.ID, d.Kind, d.Title)
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t[%s]\t%s\n", d.ID, d.Kind, cleanLine(d.Title))
 	return err
 }
 
@@ -143,8 +143,8 @@ func docDetail(cmd *cobra.Command, res client.DocumentResult) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "id:      %s\n", d.ID)
 	fmt.Fprintf(&b, "kind:    %s\n", d.Kind)
-	fmt.Fprintf(&b, "title:   %s\n", d.Title)
-	fmt.Fprintf(&b, "\n%s\n", d.Content)
+	fmt.Fprintf(&b, "title:   %s\n", cleanLine(d.Title))
+	fmt.Fprintf(&b, "\n%s\n", clean(d.Content))
 	_, err := io.WriteString(cmd.OutOrStdout(), b.String())
 	return err
 }
@@ -156,7 +156,7 @@ func docList(cmd *cobra.Command, res client.DocumentListResult) error {
 	}
 	var b strings.Builder
 	for _, d := range res.Documents {
-		fmt.Fprintf(&b, "%s\t[%s]\t%s\n", d.ID, d.Kind, d.Title)
+		fmt.Fprintf(&b, "%s\t[%s]\t%s\n", d.ID, d.Kind, cleanLine(d.Title))
 	}
 	_, err := io.WriteString(cmd.OutOrStdout(), b.String())
 	return err

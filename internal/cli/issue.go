@@ -155,7 +155,7 @@ func outputList(cmd *cobra.Command, res client.IssueListResult) error {
 	}
 	var b strings.Builder
 	for _, i := range res.Issues {
-		fmt.Fprintf(&b, "%s\t[%s/%s/%s]\t%s\n", i.ID, i.Type, i.Status, i.Priority, i.Subject)
+		fmt.Fprintf(&b, "%s\t[%s/%s/%s]\t%s\n", i.ID, i.Type, i.Status, i.Priority, cleanLine(i.Subject))
 	}
 	_, err := io.WriteString(cmd.OutOrStdout(), b.String())
 	return err
@@ -170,7 +170,7 @@ func outputHistory(cmd *cobra.Command, res client.HistoryResult) error {
 	for _, e := range res.Entries {
 		fmt.Fprintf(&b, "%s\t%s", e.At.Format(time.RFC3339), e.Kind)
 		if e.Field != "" {
-			fmt.Fprintf(&b, "\t%s: %q -> %q", e.Field, e.OldValue, e.NewValue)
+			fmt.Fprintf(&b, "\t%s: %q -> %q", e.Field, cleanLine(e.OldValue), cleanLine(e.NewValue))
 		}
 		b.WriteByte('\n')
 	}
@@ -193,7 +193,7 @@ func output(cmd *cobra.Command, res client.IssueResult) error {
 		return err
 	}
 	i := res.Issue
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t[%s/%s/%s]\t%s\n", i.ID, i.Type, i.Status, i.Priority, i.Subject)
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t[%s/%s/%s]\t%s\n", i.ID, i.Type, i.Status, i.Priority, cleanLine(i.Subject))
 	return err
 }
 
@@ -205,14 +205,14 @@ func outputDetail(cmd *cobra.Command, res client.IssueResult) error {
 	i := res.Issue
 	var b strings.Builder
 	fmt.Fprintf(&b, "id:       %s\n", i.ID)
-	fmt.Fprintf(&b, "subject:  %s\n", i.Subject)
+	fmt.Fprintf(&b, "subject:  %s\n", cleanLine(i.Subject))
 	fmt.Fprintf(&b, "type:     %s\n", i.Type)
 	fmt.Fprintf(&b, "status:   %s\n", i.Status)
 	fmt.Fprintf(&b, "priority: %s\n", i.Priority)
 	if i.Owner != "" {
-		fmt.Fprintf(&b, "owner:    %s\n", i.Owner)
+		fmt.Fprintf(&b, "owner:    %s\n", cleanLine(i.Owner))
 	}
-	fmt.Fprintf(&b, "\n%s\n", i.Body)
+	fmt.Fprintf(&b, "\n%s\n", clean(i.Body))
 	_, err := io.WriteString(cmd.OutOrStdout(), b.String())
 	return err
 }
@@ -227,18 +227,18 @@ func outputView(cmd *cobra.Command, res client.IssueViewResult) error {
 	i := v.Issue
 	var b strings.Builder
 	fmt.Fprintf(&b, "id:       %s\n", i.ID)
-	fmt.Fprintf(&b, "subject:  %s\n", i.Subject)
+	fmt.Fprintf(&b, "subject:  %s\n", cleanLine(i.Subject))
 	fmt.Fprintf(&b, "type:     %s\n", i.Type)
 	fmt.Fprintf(&b, "status:   %s\n", i.Status)
 	fmt.Fprintf(&b, "priority: %s\n", i.Priority)
 	if i.Owner != "" {
-		fmt.Fprintf(&b, "owner:    %s\n", i.Owner)
+		fmt.Fprintf(&b, "owner:    %s\n", cleanLine(i.Owner))
 	}
 	if i.ParentID != nil && *i.ParentID != "" {
 		fmt.Fprintf(&b, "parent:   %s\n", *i.ParentID)
 	}
 	if len(i.Labels) > 0 {
-		fmt.Fprintf(&b, "labels:   %s\n", strings.Join(i.Labels, ", "))
+		fmt.Fprintf(&b, "labels:   %s\n", strings.Join(cleanLabels(i.Labels), ", "))
 	}
 	if len(v.Related) > 0 {
 		fmt.Fprintf(&b, "related:  %s\n", strings.Join(v.Related, ", "))
@@ -249,15 +249,15 @@ func outputView(cmd *cobra.Command, res client.IssueViewResult) error {
 	if len(v.IsBlocking) > 0 {
 		fmt.Fprintf(&b, "is_blocking: %s\n", strings.Join(v.IsBlocking, ", "))
 	}
-	fmt.Fprintf(&b, "\n%s\n", i.Body)
+	fmt.Fprintf(&b, "\n%s\n", clean(i.Body))
 	if len(v.Comments) > 0 {
 		b.WriteString("\ncomments:\n")
 		for _, c := range v.Comments {
-			author := c.Author
+			author := cleanLine(c.Author)
 			if author == "" {
 				author = "-"
 			}
-			fmt.Fprintf(&b, "  [%s] %s: %s\n", c.CreatedAt.Format(time.RFC3339), author, c.Body)
+			fmt.Fprintf(&b, "  [%s] %s: %s\n", c.CreatedAt.Format(time.RFC3339), author, cleanLine(c.Body))
 		}
 	}
 	_, err := io.WriteString(cmd.OutOrStdout(), b.String())

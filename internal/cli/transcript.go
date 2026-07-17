@@ -92,7 +92,7 @@ func transcriptListCmd(cfg config.Config) *cobra.Command {
 			}
 			var b strings.Builder
 			for _, t := range res.Transcripts {
-				fmt.Fprintf(&b, "%s\t%s\t%s\n", t.ID, t.CapturedAt.Format("2006-01-02 15:04"), t.Title)
+				fmt.Fprintf(&b, "%s\t%s\t%s\n", t.ID, t.CapturedAt.Format("2006-01-02 15:04"), cleanLine(t.Title))
 			}
 			_, err = io.WriteString(cmd.OutOrStdout(), b.String())
 			return err
@@ -123,7 +123,7 @@ func transcriptDiscoverCmd(cfg config.Config) *cobra.Command {
 				if d.Ingested {
 					state = "ingested"
 				}
-				fmt.Fprintf(&b, "%s\t%s\t%s\n", d.SessionID, state, d.Path)
+				fmt.Fprintf(&b, "%s\t%s\t%s\n", d.SessionID, state, cleanLine(d.Path))
 			}
 			_, err = io.WriteString(cmd.OutOrStdout(), b.String())
 			return err
@@ -144,7 +144,7 @@ func outputTranscript(cmd *cobra.Command, res client.TranscriptResult) error {
 	if t.IssueID != nil {
 		link = *t.IssueID
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\tsession=%s\tissue=%s\t%s\n", t.ID, t.SessionID, link, t.Title)
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\tsession=%s\tissue=%s\t%s\n", t.ID, t.SessionID, link, cleanLine(t.Title))
 	return err
 }
 
@@ -158,7 +158,7 @@ func outputTranscriptDetail(cmd *cobra.Command, res client.TranscriptResult) err
 	var b strings.Builder
 	fmt.Fprintf(&b, "id:       %s\n", t.ID)
 	fmt.Fprintf(&b, "session:  %s\n", t.SessionID)
-	fmt.Fprintf(&b, "title:    %s\n", t.Title)
+	fmt.Fprintf(&b, "title:    %s\n", cleanLine(t.Title))
 	fmt.Fprintf(&b, "captured: %s\n\n", t.CapturedAt.Format("2006-01-02 15:04"))
 	for _, m := range t.Messages {
 		fmt.Fprintf(&b, "[%d] %s: %s\n", m.Seq, m.Role, renderMessage(m))
