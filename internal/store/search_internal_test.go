@@ -8,9 +8,10 @@ import (
 	"github.com/brent-hoover/sutra/internal/domain"
 )
 
-// TestReconcileSearch verifies that the one-time backfill restores a partially
-// populated index across all three entity kinds without duplicating rows that
-// are already indexed, and that it does not run again once its marker is set.
+// TestReconcileSearch verifies that the one-time rebuild restores an index left
+// in an inconsistent state by an interrupted migration — missing rows added,
+// stale/orphaned/duplicate rows removed — so it exactly mirrors the source
+// tables, and that it does not run again once its marker is set.
 func TestReconcileSearch(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -45,21 +46,29 @@ func TestReconcileSearch(t *testing.T) {
 		t.Fatalf("upsert transcript: %v", err)
 	}
 
-	// Simulate an interrupted first migration that left the index PARTIALLY
-	// populated (triggers indexed the issue) but never set the marker: clear the
-	// marker and drop only the document + message index rows.
+	// Simulate an inconsistent index left by an interrupted first migration
+	// (marker never set): a missing row (drop the message), a stale/orphaned row
+	// (an FTS entry for an issue id that does not exist), and a duplicate row
+	// (a second FTS entry for the real issue).
 	if _, err := s.db.Exec(`DELETE FROM schema_meta WHERE key = ?`, searchIndexedKey); err != nil {
 		t.Fatalf("clear marker: %v", err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM search_fts WHERE kind IN ('document','message')`); err != nil {
-		t.Fatalf("partial wipe: %v", err)
+	if _, err := s.db.Exec(`DELETE FROM search_fts WHERE kind = 'message'`); err != nil {
+		t.Fatalf("drop message row: %v", err)
 	}
-	if hits := searchTerm(t, s, term); len(hits) != 1 || hits[0].Kind != domain.KindIssue {
-		t.Fatalf("expected only the issue indexed after partial wipe, got %d hits", len(hits))
+	if _, err := s.db.Exec(
+		`INSERT INTO search_fts(kind, ref_id, text) VALUES ('issue', 'ghost-id', ?)`, "orphan "+term); err != nil {
+		t.Fatalf("insert orphan: %v", err)
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO search_fts(kind, ref_id, text) VALUES ('issue', ?, ?)`, iss.ID, "dup "+term); err != nil {
+		t.Fatalf("insert duplicate: %v", err)
 	}
 
-	// Reconcile (as migrate would on the next open) must restore the missing
-	// kinds without duplicating the issue that was still indexed.
+	// Reconcile (as migrate would on the next open) must rebuild the index to
+	// exactly mirror the source: restore the message, drop the orphan and the
+	// duplicate. (A surviving orphan would also make hydration fail with
+	// ErrNotFound, so a clean search proves it was removed.)
 	if err := s.reconcileSearch(); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -68,7 +77,7 @@ func TestReconcileSearch(t *testing.T) {
 		counts[h.Kind]++
 	}
 	if counts[domain.KindIssue] != 1 || counts[domain.KindDocument] != 1 || counts[domain.KindMessage] != 1 {
-		t.Fatalf("reconcile did not restore all kinds exactly once, got %v", counts)
+		t.Fatalf("reconcile did not rebuild to mirror source exactly once, got %v", counts)
 	}
 
 	// The marker is now set, so a second reconcile is a no-op — no duplicates and

@@ -92,16 +92,17 @@ END;`
 	return s.reconcileSearch()
 }
 
-// reconcileSearch performs the one-time backfill of rows written before the
-// triggers existed (an older DB) or missed by an interrupted migration, then
-// records a marker so it never runs again — from then on the triggers keep the
-// index current, so there is no per-open scan cost.
+// reconcileSearch performs a one-time atomic rebuild of the index from the
+// source tables, then records a marker so it never runs again — from then on the
+// triggers keep the index current, so there is no per-open cost.
 //
-// The whole thing runs in one transaction and is guarded by the marker, so it
-// executes at most once. The per-row NOT EXISTS guard keeps it idempotent and
-// duplicate-free even in the pathological case where a prior interrupted
-// migration left the index partially populated (via triggers) before the marker
-// was set.
+// It clears the index and repopulates it from issues, documents, and messages,
+// so the rebuilt index exactly mirrors the source tables with no stale,
+// duplicate, or orphaned rows that a prior interrupted migration (or triggers
+// firing before the marker was set) might have left behind. The clear, rebuild,
+// and marker all commit in one transaction, so an interrupted rebuild leaves the
+// marker unset and is retried cleanly on the next open. Because it is gated by
+// the marker, the full scan happens at most once.
 func (s *Store) reconcileSearch() error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -114,22 +115,19 @@ func (s *Store) reconcileSearch() error {
 		return fmt.Errorf("check search marker: %w", err)
 	}
 	if done > 0 {
-		return nil // already backfilled; triggers maintain the index from here
+		return nil // already rebuilt; triggers maintain the index from here
 	}
 
+	if _, err := tx.Exec(`DELETE FROM search_fts`); err != nil {
+		return fmt.Errorf("clear search index: %w", err)
+	}
 	for _, stmt := range []string{
-		`INSERT INTO search_fts(kind, ref_id, text)
-		 SELECT 'issue', id, subject || ' ' || body FROM issues
-		 WHERE NOT EXISTS (SELECT 1 FROM search_fts f WHERE f.kind = 'issue' AND f.ref_id = issues.id)`,
-		`INSERT INTO search_fts(kind, ref_id, text)
-		 SELECT 'document', id, content FROM documents
-		 WHERE NOT EXISTS (SELECT 1 FROM search_fts f WHERE f.kind = 'document' AND f.ref_id = documents.id)`,
-		`INSERT INTO search_fts(kind, ref_id, text)
-		 SELECT 'message', id, text FROM messages
-		 WHERE NOT EXISTS (SELECT 1 FROM search_fts f WHERE f.kind = 'message' AND f.ref_id = messages.id)`,
+		`INSERT INTO search_fts(kind, ref_id, text) SELECT 'issue', id, subject || ' ' || body FROM issues`,
+		`INSERT INTO search_fts(kind, ref_id, text) SELECT 'document', id, content FROM documents`,
+		`INSERT INTO search_fts(kind, ref_id, text) SELECT 'message', id, text FROM messages`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
-			return fmt.Errorf("reconcile search index: %w", err)
+			return fmt.Errorf("rebuild search index: %w", err)
 		}
 	}
 	if _, err := tx.Exec(
