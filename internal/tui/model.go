@@ -44,11 +44,8 @@ type Model struct {
 	viewport viewport.Model
 	vpReady  bool
 
-	// commentsByIssue caches comments added during the session, keyed by issue
-	// id, so they survive re-opening the detail view (no list-comments API).
-	commentsByIssue map[string][]domain.Comment
-
-	form form
+	form       form
+	submitting bool // a form command is in flight; ignore repeat submits
 
 	statusMsg   string
 	err         error
@@ -60,10 +57,9 @@ type Model struct {
 // New builds a Model bound to the given client.
 func New(ctx context.Context, c *client.Client) *Model {
 	return &Model{
-		ctx:             ctx,
-		client:          c,
-		mode:            listMode,
-		commentsByIssue: map[string][]domain.Comment{},
+		ctx:    ctx,
+		client: c,
+		mode:   listMode,
 	}
 }
 
@@ -91,6 +87,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case issueCreatedMsg:
+		m.submitting = false
 		m.err = msg.err
 		if msg.err == nil {
 			m.lastCreated = msg.issue
@@ -106,6 +103,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case issueUpdatedMsg:
+		m.submitting = false
 		m.err = msg.err
 		if msg.err == nil {
 			m.statusMsg = "updated " + msg.issue.ID
@@ -122,7 +120,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		if msg.err == nil {
 			d := msg.detail
-			d.comments = m.commentsByIssue[d.issue.ID]
 			m.detail = &d
 			m.mode = detailMode
 			m.setDetailContent()
@@ -130,15 +127,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case commentAddedMsg:
+		m.submitting = false
 		m.err = msg.err
 		if msg.err == nil {
 			id := msg.comment.IssueID
-			m.commentsByIssue[id] = append(m.commentsByIssue[id], msg.comment)
 			m.statusMsg = "commented on " + id
 			if m.detail != nil && m.detail.issue.ID == id {
-				m.detail.comments = m.commentsByIssue[id]
 				m.mode = detailMode
-				m.setDetailContent()
+				return m, m.loadDetailCmd(id) // re-fetch so the new comment shows
 			}
 		}
 		return m, nil

@@ -18,12 +18,14 @@ const (
 	commentForm
 )
 
-// field is one editable line in a form. An empty value with a placeholder means
-// "leave unchanged" for edits.
+// field is one editable line in a form. For edits, edited distinguishes an
+// untouched field ("leave unchanged") from one deliberately set empty (e.g.
+// clearing owner), which value alone cannot express.
 type field struct {
 	label       string
 	value       string
 	placeholder string
+	edited      bool
 }
 
 // form is the state of the active input form.
@@ -87,6 +89,9 @@ func (m *Model) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = m.formReturnMode()
 		return m, nil
 	case tea.KeyEnter:
+		if m.submitting {
+			return m, nil // a submit is already in flight; ignore repeats
+		}
 		return m.submitForm()
 	case tea.KeyTab, tea.KeyDown:
 		m.form.active = (m.form.active + 1) % len(m.form.fields)
@@ -96,15 +101,20 @@ func (m *Model) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyBackspace:
 		f := &m.form.fields[m.form.active]
+		f.edited = true
 		if r := []rune(f.value); len(r) > 0 {
 			f.value = string(r[:len(r)-1])
 		}
 		return m, nil
 	case tea.KeySpace:
-		m.form.fields[m.form.active].value += " "
+		f := &m.form.fields[m.form.active]
+		f.value += " "
+		f.edited = true
 		return m, nil
 	case tea.KeyRunes:
-		m.form.fields[m.form.active].value += string(msg.Runes)
+		f := &m.form.fields[m.form.active]
+		f.value += string(msg.Runes)
+		f.edited = true
 		return m, nil
 	}
 	return m, nil
@@ -128,6 +138,7 @@ func (m *Model) fieldValue(label string) string {
 
 // submitForm turns the form into the appropriate client command.
 func (m *Model) submitForm() (tea.Model, tea.Cmd) {
+	m.submitting = true
 	switch m.form.purpose {
 	case createForm:
 		return m, m.createIssueCmd(m.fieldValue("subject"), m.fieldValue("body"), "")
@@ -136,7 +147,12 @@ func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 	case editForm:
 		fields := map[string]string{}
 		for _, f := range m.form.fields {
-			if f.value != "" {
+			if !f.edited {
+				continue // untouched: leave unchanged
+			}
+			// owner is free text and may be cleared; the enum fields have no
+			// valid empty value, so an edited-but-empty enum is left unchanged.
+			if f.label == "owner" || f.value != "" {
 				fields[f.label] = f.value
 			}
 		}
@@ -157,9 +173,9 @@ func (m *Model) formView() string {
 		if i == m.form.active {
 			name = styles.active.Render("> " + f.label + ":")
 		}
-		shown := f.value
-		if shown == "" && f.placeholder != "" {
-			shown = styles.dim.Render(f.placeholder)
+		shown := cleanLine(f.value)
+		if f.value == "" && f.placeholder != "" {
+			shown = styles.dim.Render(cleanLine(f.placeholder))
 		}
 		b.WriteString(name + " " + shown + "\n")
 	}

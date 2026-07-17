@@ -12,6 +12,22 @@ type createCommentRequest struct {
 	Body   string `json:"body"`
 }
 
+func (s *Server) listComments(w http.ResponseWriter, r *http.Request) {
+	comments, err := s.svc.IssueComments(r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if comments == nil {
+		comments = []domain.Comment{}
+	}
+	writeJSON(w, http.StatusOK, comments)
+}
+
 func (s *Server) createComment(w http.ResponseWriter, r *http.Request) {
 	var req createCommentRequest
 	if err := decodeBody(r, &req); err != nil {

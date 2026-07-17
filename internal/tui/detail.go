@@ -54,25 +54,25 @@ func (m *Model) renderDetail() string {
 	d := m.detail
 	i := d.issue
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n", styles.title.Render("Issue "+i.ID))
-	fmt.Fprintf(&b, "%s %s\n", styles.fieldName.Render("subject:"), i.Subject)
+	fmt.Fprintf(&b, "%s\n", styles.title.Render("Issue "+cleanLine(i.ID)))
+	fmt.Fprintf(&b, "%s %s\n", styles.fieldName.Render("subject:"), cleanLine(i.Subject))
 	fmt.Fprintf(&b, "%s %s\n", styles.fieldName.Render("type:"), i.Type)
 	fmt.Fprintf(&b, "%s %s\n", styles.fieldName.Render("status:"), i.Status)
 	fmt.Fprintf(&b, "%s %s\n", styles.fieldName.Render("priority:"), i.Priority)
 	if i.Owner != "" {
-		fmt.Fprintf(&b, "%s %s\n", styles.fieldName.Render("owner:"), i.Owner)
+		fmt.Fprintf(&b, "%s %s\n", styles.fieldName.Render("owner:"), cleanLine(i.Owner))
 	}
 	if i.ParentID != nil {
-		fmt.Fprintf(&b, "%s %s\n", styles.fieldName.Render("parent:"), *i.ParentID)
+		fmt.Fprintf(&b, "%s %s\n", styles.fieldName.Render("parent:"), cleanLine(*i.ParentID))
 	}
-	fmt.Fprintf(&b, "\n%s\n", i.Body)
+	fmt.Fprintf(&b, "\n%s\n", clean(i.Body))
 
 	fmt.Fprintf(&b, "\n%s\n", styles.section.Render(fmt.Sprintf("Documents (%d)", len(d.documents))))
 	if len(d.documents) == 0 {
 		b.WriteString(styles.dim.Render("  (none)") + "\n")
 	}
 	for _, doc := range d.documents {
-		fmt.Fprintf(&b, "  - [%s] %s\n", doc.Kind, doc.Title)
+		fmt.Fprintf(&b, "  - [%s] %s\n", doc.Kind, cleanLine(doc.Title))
 	}
 
 	fmt.Fprintf(&b, "\n%s\n", styles.section.Render(fmt.Sprintf("Comments (%d)", len(d.comments))))
@@ -84,7 +84,7 @@ func (m *Model) renderDetail() string {
 		if author == "" {
 			author = "anon"
 		}
-		fmt.Fprintf(&b, "  - %s: %s\n", author, c.Body)
+		fmt.Fprintf(&b, "  - %s: %s\n", cleanLine(author), cleanLine(c.Body))
 	}
 
 	fmt.Fprintf(&b, "\n%s\n", styles.section.Render(fmt.Sprintf("Linked transcripts (%d)", len(d.transcripts))))
@@ -96,7 +96,7 @@ func (m *Model) renderDetail() string {
 		if title == "" {
 			title = t.SessionID
 		}
-		fmt.Fprintf(&b, "  - %s (%s)\n", title, t.CapturedAt.Format("2006-01-02"))
+		fmt.Fprintf(&b, "  - %s (%s)\n", cleanLine(title), t.CapturedAt.Format("2006-01-02"))
 	}
 	return b.String()
 }

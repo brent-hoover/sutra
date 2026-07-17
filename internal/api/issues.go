@@ -82,6 +82,7 @@ type updateIssueRequest struct {
 	Status   *domain.Status    `json:"status"`
 	Priority *domain.Priority  `json:"priority"`
 	Owner    *string           `json:"owner"`
+	ParentID *string           `json:"parent_id"`
 }
 
 func (s *Server) updateIssue(w http.ResponseWriter, r *http.Request) {
@@ -95,6 +96,7 @@ func (s *Server) updateIssue(w http.ResponseWriter, r *http.Request) {
 		Status:   req.Status,
 		Priority: req.Priority,
 		Owner:    req.Owner,
+		ParentID: req.ParentID,
 	})
 	if errors.Is(err, domain.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "issue not found")

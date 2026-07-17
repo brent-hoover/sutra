@@ -192,14 +192,17 @@ func registerSlice8Steps(sc *godog.ScenarioContext, w *world) {
 		if !containsIssue(st.model.Issues(), st.child.ID) {
 			return fmt.Errorf("child issue %s does not appear in the TUI list", st.child.ID)
 		}
-		if _, err := w.verify.GetIssue(st.child.ID); err != nil {
+		// The TUI create-child flow sets parent_id through the client; verify it
+		// persisted on the stored child (read via the independent verify handle).
+		stored, err := w.verify.GetIssue(st.child.ID)
+		if err != nil {
 			return fmt.Errorf("child issue not persisted: %w", err)
 		}
-		// The TUI create-child flow sets parent_id to the parent and sends it
-		// through the client. NOTE: persisting parent_id server-side is Slice 4
-		// (parent/child linking); this asserts the TUI wired the relationship.
+		if stored.ParentID == nil || *stored.ParentID != w.issue.ID {
+			return fmt.Errorf("stored child parent_id = %v, want %q", stored.ParentID, w.issue.ID)
+		}
 		if st.child.ParentID == nil || *st.child.ParentID != w.issue.ID {
-			return fmt.Errorf("child parent_id = %v, want %q", st.child.ParentID, w.issue.ID)
+			return fmt.Errorf("returned child parent_id = %v, want %q", st.child.ParentID, w.issue.ID)
 		}
 		return nil
 	})

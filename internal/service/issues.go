@@ -50,11 +50,16 @@ func (s *Service) ListIssues(f domain.IssueFilter) ([]domain.Issue, error) {
 
 // IssueUpdate carries the fields a caller wants to change. A nil pointer means
 // "leave unchanged"; this lets callers clear a field (e.g. owner to "").
+//
+// ParentID wires the existing issues.parent_id column through the update path so
+// a child issue can record its parent. The wider parent/child feature set
+// (cycle rejection, relationship views) remains Slice 4's concern.
 type IssueUpdate struct {
 	Type     *domain.IssueType
 	Status   *domain.Status
 	Priority *domain.Priority
 	Owner    *string
+	ParentID *string
 }
 
 // UpdateIssue applies the requested field changes, appends a ledger entry per
@@ -107,6 +112,15 @@ func (s *Service) UpdateIssue(id string, upd IssueUpdate) (domain.Issue, error) 
 			old := issue.Owner
 			issue.Owner = *upd.Owner
 			record(domain.LedgerUpdated, "owner", old, issue.Owner)
+		}
+		if upd.ParentID != nil && (issue.ParentID == nil || *issue.ParentID != *upd.ParentID) {
+			var old string
+			if issue.ParentID != nil {
+				old = *issue.ParentID
+			}
+			p := *upd.ParentID
+			issue.ParentID = &p
+			record(domain.LedgerUpdated, "parent_id", old, p)
 		}
 
 		if len(entries) == 0 {

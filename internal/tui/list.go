@@ -52,9 +52,9 @@ func (m *Model) listView() string {
 	}
 	for i, is := range m.issues {
 		cursor := "  "
-		line := fmt.Sprintf("%s\t[%s/%s/%s]\t%s", is.ID, is.Type, is.Status, is.Priority, is.Subject)
+		line := fmt.Sprintf("%s\t[%s/%s/%s]\t%s", cleanLine(is.ID), is.Type, is.Status, is.Priority, cleanLine(is.Subject))
 		if is.ParentID != nil {
-			line += styles.dim.Render(" (child of " + *is.ParentID + ")")
+			line += styles.dim.Render(" (child of " + cleanLine(*is.ParentID) + ")")
 		}
 		if i == m.cursor {
 			cursor = styles.cursor.Render("> ")
@@ -71,9 +71,9 @@ func (m *Model) footer(help string) string {
 	var b strings.Builder
 	b.WriteByte('\n')
 	if m.err != nil {
-		b.WriteString(styles.errMsg.Render("error: "+m.err.Error()) + "\n")
+		b.WriteString(styles.errMsg.Render("error: "+cleanLine(m.err.Error())) + "\n")
 	} else if m.statusMsg != "" {
-		b.WriteString(styles.status.Render(m.statusMsg) + "\n")
+		b.WriteString(styles.status.Render(cleanLine(m.statusMsg)) + "\n")
 	}
 	b.WriteString(styles.help.Render(help))
 	return b.String()

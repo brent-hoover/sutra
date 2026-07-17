@@ -46,13 +46,8 @@ func (m *Model) loadIssuesCmd() tea.Cmd {
 }
 
 // createIssueCmd creates an issue. When parentID is set it is a child issue:
-// after creation the TUI sends parent_id through the update endpoint and marks
-// the returned issue as a child locally.
-//
-// NOTE: on this base the create/update API does not yet persist parent_id
-// (parent/child linking is Slice 4). The client call is still made so the flow
-// completes end-to-end once that lands; the local ParentID reflects the
-// intended relationship so the TUI shows the child under its parent.
+// after creation the TUI sets parent_id through the update endpoint (which
+// persists it on the issue) and returns the stored child.
 func (m *Model) createIssueCmd(subject, body, parentID string) tea.Cmd {
 	ctx, c := m.ctx, m.client
 	return func() tea.Msg {
@@ -60,14 +55,14 @@ func (m *Model) createIssueCmd(subject, body, parentID string) tea.Cmd {
 		if err != nil {
 			return issueCreatedMsg{err: err}
 		}
-		issue := res.Issue
 		if parentID != "" {
-			_, _ = c.UpdateIssue(ctx, issue.ID, map[string]string{"parent_id": parentID})
-			p := parentID
-			issue.ParentID = &p
-			return issueCreatedMsg{issue: issue, asChild: true}
+			ures, uerr := c.UpdateIssue(ctx, res.Issue.ID, map[string]string{"parent_id": parentID})
+			if uerr != nil {
+				return issueCreatedMsg{err: uerr}
+			}
+			return issueCreatedMsg{issue: ures.Issue, asChild: true}
 		}
-		return issueCreatedMsg{issue: issue}
+		return issueCreatedMsg{issue: res.Issue}
 	}
 }
 
@@ -80,9 +75,8 @@ func (m *Model) updateIssueCmd(id string, fields map[string]string) tea.Cmd {
 	}
 }
 
-// loadDetailCmd fetches an issue with its documents and linked transcripts.
-// Comments are held in the model's per-issue cache (there is no list-comments
-// client method on this base) and merged in when the detail message is reduced.
+// loadDetailCmd fetches an issue with its documents, comments, and linked
+// transcripts.
 func (m *Model) loadDetailCmd(id string) tea.Cmd {
 	ctx, c := m.ctx, m.client
 	return func() tea.Msg {
@@ -96,6 +90,11 @@ func (m *Model) loadDetailCmd(id string) tea.Cmd {
 			return detailLoadedMsg{err: err}
 		}
 		d.documents = dr.Documents
+		cr, err := c.ListComments(ctx, id)
+		if err != nil {
+			return detailLoadedMsg{err: err}
+		}
+		d.comments = cr.Comments
 		tr, err := c.TranscriptsForIssue(ctx, id)
 		if err != nil {
 			return detailLoadedMsg{err: err}
