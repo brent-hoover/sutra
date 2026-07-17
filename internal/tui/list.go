@@ -58,14 +58,20 @@ func (m *Model) listView() string {
 	}
 	for i := start; i < end; i++ {
 		is := m.issues[i]
-		// Build the plain line, truncate it to the terminal width (minus the
-		// 2-col cursor) so a long subject can't wrap onto a second row and push
-		// the selection off-screen, THEN apply styling.
-		line := fmt.Sprintf("%s\t[%s/%s/%s]\t%s", cleanLine(is.ID), is.Type, is.Status, is.Priority, cleanLine(is.Subject))
+		// Build the plain line with fixed spacing (no tabs — tab display width is
+		// ambiguous), then truncate it to the terminal width (minus the 2-col
+		// cursor) so a long subject can't wrap onto a second row and push the
+		// selection off-screen, THEN apply styling.
+		line := fmt.Sprintf("%s  [%s/%s/%s]  %s", cleanLine(is.ID), is.Type, is.Status, is.Priority, cleanLine(is.Subject))
 		if is.ParentID != nil {
 			line += " (child of " + cleanLine(*is.ParentID) + ")"
 		}
-		line = truncate(line, m.width-2)
+		if avail := m.width - 2; m.width > 0 {
+			if avail < 1 {
+				avail = 1
+			}
+			line = truncate(line, avail)
+		}
 		cursor := "  "
 		if i == m.cursor {
 			cursor = styles.cursor.Render("> ")

@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/charmbracelet/x/ansi"
+)
 
 // clean strips terminal control characters (C0/C1 controls, ESC, DEL) from a
 // daemon-provided string so a crafted subject, body, title, or comment cannot
@@ -32,20 +36,14 @@ func cleanLine(s string) string {
 	return strings.NewReplacer("\n", " ", "\t", " ", "\r", " ").Replace(clean(s))
 }
 
-// truncate shortens a plain (unstyled) string to at most w runes, appending an
-// ellipsis when it overflows. A non-positive w leaves the string unchanged
-// (width not yet known). It must be applied before styling — truncating a
-// string that already contains ANSI escapes would corrupt them.
+// truncate shortens s to at most w terminal display cells (handling wide and
+// zero-width runes), appending an ellipsis when it overflows. A non-positive w
+// means the width is not yet known and the string is returned unchanged.
+// Callers must fold tabs first (tab display width is ambiguous); this operates
+// on already-tab-free text.
 func truncate(s string, w int) string {
-	if w <= 0 {
+	if w <= 0 || ansi.StringWidth(s) <= w {
 		return s
 	}
-	r := []rune(s)
-	if len(r) <= w {
-		return s
-	}
-	if w == 1 {
-		return "…"
-	}
-	return string(r[:w-1]) + "…"
+	return ansi.Truncate(s, w, "…")
 }
