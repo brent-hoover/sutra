@@ -54,6 +54,7 @@ func TestIsLoopbackAddr(t *testing.T) {
 		{"[::1]:8422", true},
 		{"localhost:8422", true},
 		{"localhost", true},
+		{"LOCALHOST:8422", true},
 		{"0.0.0.0:8422", false},
 		{":8422", false}, // empty host = all interfaces
 		{"192.168.1.5:8422", false},

@@ -52,7 +52,10 @@ func TestBearerAuth(t *testing.T) {
 	}{
 		{"correct token", "Bearer s3cret", http.StatusOK},
 		{"lowercase scheme", "bearer s3cret", http.StatusOK},
+		{"multiple spaces", "Bearer  s3cret", http.StatusOK},
 		{"missing token", "", http.StatusUnauthorized},
+		{"scheme only", "Bearer", http.StatusUnauthorized},
+		{"extra credential field", "Bearer s3cret extra", http.StatusUnauthorized},
 		{"wrong token", "Bearer nope", http.StatusUnauthorized},
 		{"malformed header", "s3cret", http.StatusUnauthorized},
 	}
