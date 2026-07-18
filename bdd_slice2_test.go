@@ -178,7 +178,9 @@ func registerSlice2Steps(sc *godog.ScenarioContext, w *world) {
 		// Point the CLI at an instrumented server that returns a KNOWN response
 		// body and counts requests, so we can assert exactly one request and
 		// byte-for-byte passthrough.
-		const canned = `{"id":"canned-id","subject":"thin client","body":"b","type":"task","status":"open","priority":"p2","created_at":"2026-07-16T10:00:00Z","updated_at":"2026-07-16T10:00:00Z"}`
+		// Deliberate leading/trailing whitespace: a faithful passthrough must
+		// preserve it (the only allowed transform is a single trailing newline).
+		const canned = "   {\"id\":\"canned-id\",\"subject\":\"thin client\",\"body\":\"b\",\"type\":\"task\",\"status\":\"open\",\"priority\":\"p2\",\"created_at\":\"2026-07-16T10:00:00Z\",\"updated_at\":\"2026-07-16T10:00:00Z\"}   "
 		var count int64
 		srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 			atomic.AddInt64(&count, 1)

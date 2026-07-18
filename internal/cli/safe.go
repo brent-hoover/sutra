@@ -1,6 +1,23 @@
 package cli
 
-import "strings"
+import (
+	"io"
+	"strings"
+)
+
+// printRawJSON writes a raw JSON response byte-for-byte (no trimming), ensuring
+// exactly one trailing newline for terminal readability. This preserves the
+// daemon's response verbatim so `--json` is a faithful passthrough.
+func printRawJSON(w io.Writer, raw []byte) error {
+	if _, err := w.Write(raw); err != nil {
+		return err
+	}
+	if n := len(raw); n == 0 || raw[n-1] != '\n' {
+		_, err := io.WriteString(w, "\n")
+		return err
+	}
+	return nil
+}
 
 // clean strips terminal control characters (C0/C1 controls, ESC, DEL) from a
 // daemon-provided string so crafted stored content (issue subjects, document

@@ -24,7 +24,7 @@ func searchCmd(cfg config.Config) *cobra.Command {
 				return err
 			}
 			if jsonOut, _ := cmd.Flags().GetBool("json"); jsonOut {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(res.Raw)))
+				err := printRawJSON(cmd.OutOrStdout(), res.Raw)
 				return err
 			}
 			return renderSearch(cmd, res.Results)

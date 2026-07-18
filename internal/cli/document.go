@@ -118,7 +118,7 @@ func docRemoveCmd(cfg config.Config) *cobra.Command {
 // docWantJSON prints the raw response when --json is set.
 func docWantJSON(cmd *cobra.Command, raw []byte) (bool, error) {
 	if jsonOut, _ := cmd.Flags().GetBool("json"); jsonOut {
-		_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(raw)))
+		err := printRawJSON(cmd.OutOrStdout(), raw)
 		return true, err
 	}
 	return false, nil

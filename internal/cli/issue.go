@@ -144,7 +144,7 @@ func jsonRequested(cmd *cobra.Command) bool {
 
 // printRaw writes the raw JSON response, trimmed.
 func printRaw(cmd *cobra.Command, raw json.RawMessage) error {
-	_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(raw)))
+	err := printRawJSON(cmd.OutOrStdout(), raw)
 	return err
 }
 
@@ -181,7 +181,7 @@ func outputHistory(cmd *cobra.Command, res client.HistoryResult) error {
 // wantJSON reports whether --json was set and, if so, prints the raw response.
 func wantJSON(cmd *cobra.Command, res client.IssueResult) (bool, error) {
 	if jsonOut, _ := cmd.Flags().GetBool("json"); jsonOut {
-		_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(res.Raw)))
+		err := printRawJSON(cmd.OutOrStdout(), res.Raw)
 		return true, err
 	}
 	return false, nil

@@ -87,7 +87,7 @@ func transcriptListCmd(cfg config.Config) *cobra.Command {
 				return err
 			}
 			if jsonOut, _ := cmd.Flags().GetBool("json"); jsonOut {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(res.Raw)))
+				err := printRawJSON(cmd.OutOrStdout(), res.Raw)
 				return err
 			}
 			var b strings.Builder
@@ -114,7 +114,7 @@ func transcriptDiscoverCmd(cfg config.Config) *cobra.Command {
 				return err
 			}
 			if jsonOut, _ := cmd.Flags().GetBool("json"); jsonOut {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(res.Raw)))
+				err := printRawJSON(cmd.OutOrStdout(), res.Raw)
 				return err
 			}
 			var b strings.Builder
@@ -136,7 +136,7 @@ func transcriptDiscoverCmd(cfg config.Config) *cobra.Command {
 // outputTranscript prints a compact one-line confirmation (ingest, link).
 func outputTranscript(cmd *cobra.Command, res client.TranscriptResult) error {
 	if jsonOut, _ := cmd.Flags().GetBool("json"); jsonOut {
-		_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(res.Raw)))
+		err := printRawJSON(cmd.OutOrStdout(), res.Raw)
 		return err
 	}
 	t := res.Transcript
@@ -151,7 +151,7 @@ func outputTranscript(cmd *cobra.Command, res client.TranscriptResult) error {
 // outputTranscriptDetail prints the transcript's messages in seq order.
 func outputTranscriptDetail(cmd *cobra.Command, res client.TranscriptResult) error {
 	if jsonOut, _ := cmd.Flags().GetBool("json"); jsonOut {
-		_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(res.Raw)))
+		err := printRawJSON(cmd.OutOrStdout(), res.Raw)
 		return err
 	}
 	t := res.Transcript
