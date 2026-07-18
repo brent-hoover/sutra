@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -84,14 +85,21 @@ func authMiddleware(token string, next http.Handler) http.Handler {
 	if token == "" {
 		return next
 	}
-	want := []byte(token)
+	// Hash both sides to fixed-size digests before the constant-time compare, so
+	// the comparison length (and thus the configured token length) never leaks
+	// through timing.
+	want := sha256.Sum256([]byte(token))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Scheme is case-insensitive per RFC 7235; only the token is secret, so
 		// only it gets a constant-time compare. Fields tolerates arbitrary
 		// whitespace between scheme and credentials and requires exactly two.
 		fields := strings.Fields(r.Header.Get("Authorization"))
-		if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") ||
-			subtle.ConstantTimeCompare([]byte(fields[1]), want) != 1 {
+		if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		got := sha256.Sum256([]byte(fields[1]))
+		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
@@ -114,7 +122,15 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 	defer svc.Close()
 
-	srv := &http.Server{Addr: cfg.ListenAddr, Handler: HandlerWithAuth(svc, cfg.Token)}
+	srv := &http.Server{
+		Addr:    cfg.ListenAddr,
+		Handler: HandlerWithAuth(svc, cfg.Token),
+		// Bound how long an unauthenticated peer may hold a connection before its
+		// request headers arrive, mitigating slow-header (Slowloris) DoS on the
+		// LAN-facing daemon. IdleTimeout caps kept-alive idle connections.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.ListenAndServe() }()
 

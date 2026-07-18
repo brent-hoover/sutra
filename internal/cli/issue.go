@@ -142,7 +142,7 @@ func jsonRequested(cmd *cobra.Command) bool {
 	return b
 }
 
-// printRaw writes the raw JSON response, trimmed.
+// printRaw writes the raw JSON response verbatim (see printRawJSON).
 func printRaw(cmd *cobra.Command, raw json.RawMessage) error {
 	err := printRawJSON(cmd.OutOrStdout(), raw)
 	return err

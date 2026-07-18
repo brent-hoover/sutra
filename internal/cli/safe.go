@@ -5,9 +5,10 @@ import (
 	"strings"
 )
 
-// printRawJSON writes a raw JSON response byte-for-byte (no trimming), ensuring
-// exactly one trailing newline for terminal readability. This preserves the
-// daemon's response verbatim so `--json` is a faithful passthrough.
+// printRawJSON writes a raw JSON response byte-for-byte (no trimming). The
+// daemon's bytes are preserved verbatim so `--json` is a faithful passthrough;
+// the only transform is appending a single trailing newline when the response
+// does not already end in one (existing trailing newlines are left as-is).
 func printRawJSON(w io.Writer, raw []byte) error {
 	if _, err := w.Write(raw); err != nil {
 		return err
