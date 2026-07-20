@@ -110,6 +110,7 @@ func (w *world) setup() error {
 		DBPath:      filepath.Join(dir, "test.db"),
 		Token:       "test-secret-token",
 		ProjectsDir: dir,
+		SkillsDir:   filepath.Join(dir, "skills"),
 	}
 
 	// Start the daemon via the real Cobra `serve` command, retrying to tolerate
@@ -855,6 +856,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	registerSlice9Steps(sc, w)
 	registerSlice10Steps(sc, w)
 	registerSlice11Steps(sc, w)
+	registerSlice12Steps(sc, w)
 }
 
 // registerSlice7Steps wires the step definitions for the @slice7 scenarios:

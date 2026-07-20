@@ -63,6 +63,7 @@ projects_dir = "~/.claude/projects"     # dir transcript ingest/discover is conf
 | `token`        | *(empty)*                   | Bearer token; required to bind a non-loopback address  |
 | `db_path`      | `~/.sutra/sutra.db`         | SQLite database file                                   |
 | `projects_dir` | `~/.claude/projects`        | Directory transcript ingest/discover is confined to    |
+| `skills_dir`   | `~/.claude/skills`          | Default directory `skill install` writes skills into    |
 
 > The `token` is a secret in plaintext. When the file sets a `token`, Sutra
 > **refuses to start unless the file is owner-only** (`chmod 600
@@ -128,6 +129,22 @@ Full-text across issues, documents, and transcript messages (SQLite FTS5).
 
 ```bash
 sutra search <query> [--kind issue|document|message] [--issue <id>] [--limit <n>]
+```
+
+### Skills
+
+Store reusable agent skills (a SKILL.md) and install them to a machine's skills
+directory. `install` is client-side: it fetches the skill from the daemon and
+writes it locally to `<skills_dir>/<slug>/SKILL.md`.
+
+```bash
+sutra skill create --name "Graphify" --content-file ./SKILL.md   # or --content "..."
+sutra skill list
+sutra skill view <id>
+sutra skill update <id> --content-file ./SKILL.md
+sutra skill install <id>              # → ~/.claude/skills/<slug>/SKILL.md (or skills_dir)
+sutra skill install <id> --dir ./.claude/skills
+sutra skill delete <id>
 ```
 
 ### Activity ("what was I working on?")

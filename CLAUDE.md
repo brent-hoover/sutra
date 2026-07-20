@@ -75,7 +75,8 @@ SUTRA_BACKLOG=1 go test -run TestBacklog ./...
   `$XDG_CONFIG_HOME/sutra/config.toml` (default `~/.config/sutra/config.toml`),
   overlaying set keys onto defaults; a missing file uses defaults, an unknown key
   or malformed file is a startup error. Keys: `listen_addr`, `host`, `token`,
-  `db_path`, `projects_dir`. (`SUTRA_BACKLOG` is a test-only toggle, unrelated.)
+  `db_path`, `projects_dir`, `skills_dir`. (`SUTRA_BACKLOG` is a test-only
+  toggle, unrelated.)
 - **Ledger on every mutation.** Every issue-changing operation writes an
   append-only `LedgerEntry` and bumps `updated_at`, in the same transaction.
   Ledger entries are never updated or deleted.
@@ -113,4 +114,6 @@ Slices 1–8 are implemented, individually roborev-passed, and merged to
 entity — 1 project = 1 repo; nullable `project_id` on issues/threads;
 transcripts auto-associate by matching their session cwd to `repo_path`), and
 slice 11 (`thread` meta-object grouping issues/documents/transcripts/comments
-many-to-many). Not yet done: deploy to the LAN server box.
+many-to-many), and slice 12 (`skill` entity — a stored SKILL.md, global scope —
+with a client-side `skill install` that writes `<skills_dir>/<slug>/SKILL.md`).
+Not yet done: deploy to the LAN server box.

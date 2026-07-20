@@ -143,6 +143,26 @@ UNIQUE(thread_id, kind, item_id).
 - **Invariants:** an attached item's kind must be known and the item must exist.
   Deleting a thread removes its memberships but leaves the referenced items.
 
+### Skill
+
+A reusable agent skill stored as a SKILL.md. Global (not project-scoped). The
+CLI `skill install` writes `content` verbatim to `<skills_dir>/<slug>/SKILL.md`
+on the client machine.
+
+| field | type | required | notes |
+|-------|------|----------|-------|
+| `id` | string | yes | generated |
+| `name` | string | yes | |
+| `slug` | string | yes | **unique**, canonical (URL-safe); defaults to a slugified name |
+| `description` | string | no | one-line summary |
+| `content` | string | yes | the SKILL.md body written on install |
+| `created_at` | timestamp | yes | |
+| `updated_at` | timestamp | yes | |
+
+- **Invariants:** slug is unique and canonical; content is non-empty. Install is
+  a client-side write (the daemon never touches the client's filesystem); the
+  slug must be a single safe path element.
+
 ### Transcript
 - **Module:** `domain`
 - A captured Claude session — the container for its Messages. Ingested from

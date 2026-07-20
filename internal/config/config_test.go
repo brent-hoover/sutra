@@ -52,6 +52,7 @@ host         = "http://192.168.1.10:9000"
 token        = "s3cret"
 db_path      = "/data/sutra.db"
 projects_dir = "/data/projects"
+skills_dir   = "/data/skills"
 `)
 
 	cfg, err := Load()
@@ -64,6 +65,7 @@ projects_dir = "/data/projects"
 		Token:       "s3cret",
 		DBPath:      "/data/sutra.db",
 		ProjectsDir: "/data/projects",
+		SkillsDir:   "/data/skills",
 	}
 	if cfg != want {
 		t.Errorf("Load() = %+v, want %+v", cfg, want)

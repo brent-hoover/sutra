@@ -87,6 +87,12 @@ func Handler(svc *service.Service) http.Handler {
 	mux.HandleFunc("DELETE /threads/{id}", s.deleteThread)
 	mux.HandleFunc("POST /threads/{id}/items", s.addThreadItem)
 	mux.HandleFunc("DELETE /threads/{id}/items", s.removeThreadItem)
+	// Skills (slice 12).
+	mux.HandleFunc("POST /skills", s.createSkill)
+	mux.HandleFunc("GET /skills", s.listSkills)
+	mux.HandleFunc("GET /skills/{id}", s.getSkill)
+	mux.HandleFunc("PATCH /skills/{id}", s.updateSkill)
+	mux.HandleFunc("DELETE /skills/{id}", s.deleteSkill)
 	return mux
 }
 

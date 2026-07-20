@@ -18,6 +18,7 @@ type Config struct {
 	Host        string // client target, e.g. "http://localhost:8422"
 	Token       string // bearer token (empty disables auth on loopback)
 	ProjectsDir string // Claude projects dir transcript ingest/discover is confined to
+	SkillsDir   string // default dir `skill install` writes skills into (client-side)
 }
 
 // fileConfig mirrors the on-disk TOML. Fields left unset in the file stay empty
@@ -28,6 +29,7 @@ type fileConfig struct {
 	Host        string `toml:"host"`
 	Token       string `toml:"token"`
 	ProjectsDir string `toml:"projects_dir"`
+	SkillsDir   string `toml:"skills_dir"`
 }
 
 // Load builds a Config from the TOML file at ConfigPath, overlaying any set
@@ -89,12 +91,16 @@ func Load() (Config, error) {
 	if fc.ProjectsDir != "" {
 		cfg.ProjectsDir = fc.ProjectsDir
 	}
+	if fc.SkillsDir != "" {
+		cfg.SkillsDir = fc.SkillsDir
+	}
 
 	// TOML has no shell expansion, so a home-relative path like "~/.sutra/sutra.db"
 	// would otherwise be created under the current directory. Expand it for the
 	// filesystem-path fields.
 	cfg.DBPath = expandHome(cfg.DBPath)
 	cfg.ProjectsDir = expandHome(cfg.ProjectsDir)
+	cfg.SkillsDir = expandHome(cfg.SkillsDir)
 	return cfg, nil
 }
 
@@ -123,7 +129,19 @@ func defaults() Config {
 		Host:        "http://127.0.0.1:8422",
 		Token:       "",
 		ProjectsDir: DefaultProjectsDir(),
+		SkillsDir:   DefaultSkillsDir(),
 	}
+}
+
+// DefaultSkillsDir returns the default directory `skill install` writes into
+// (~/.claude/skills), falling back to a relative path if the home directory
+// cannot be determined.
+func DefaultSkillsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".claude", "skills")
+	}
+	return filepath.Join(home, ".claude", "skills")
 }
 
 // ConfigPath returns the path to the TOML config file:
