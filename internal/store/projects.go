@@ -165,13 +165,20 @@ func (s *Store) UpdateProjectTx(id string, mutate func(*domain.Project) error) (
 	if err != nil {
 		return domain.Project{}, err // ErrNotFound when absent
 	}
-	origRepoPath := p.RepoPath
+	origRepoPath, origSlug := p.RepoPath, p.Slug
 	if err := mutate(&p); err != nil {
 		return domain.Project{}, err
 	}
 	p.UpdatedAt = time.Now().UTC()
 	if err := p.Validate(); err != nil {
 		return domain.Project{}, err
+	}
+	// Enforce canonical slug only on change, grandfathering an unchanged legacy
+	// slug so unrelated fields can still be updated.
+	if p.Slug != origSlug {
+		if err := domain.ValidateSlug(p.Slug); err != nil {
+			return domain.Project{}, err
+		}
 	}
 	// Only re-check encoded collisions when the repo path actually changed, so a
 	// legacy project with a colliding path can still update its other fields (and

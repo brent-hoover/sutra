@@ -217,9 +217,9 @@ erDiagram
     ISSUE }o--o{ ISSUE : related
     ISSUE }o--o{ ISSUE : blocks
     TRANSCRIPT ||--o{ MESSAGE : contains
-    PROJECT ||--o{ ISSUE : scopes
-    PROJECT ||--o{ THREAD : scopes
-    PROJECT ||--o{ TRANSCRIPT : "auto-associates"
+    PROJECT |o--o{ ISSUE : scopes
+    PROJECT |o--o{ THREAD : scopes
+    PROJECT |o--o{ TRANSCRIPT : "auto-associates"
     THREAD }o--o{ ISSUE : groups
     THREAD }o--o{ DOCUMENT : groups
     THREAD }o--o{ TRANSCRIPT : groups

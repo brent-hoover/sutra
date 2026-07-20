@@ -28,6 +28,9 @@ func (s *Service) CreateProject(name, repoPath, slug, description string) (domai
 	if err := p.Validate(); err != nil {
 		return domain.Project{}, err
 	}
+	if err := domain.ValidateSlug(p.Slug); err != nil {
+		return domain.Project{}, err
+	}
 	if err := s.store.CreateProject(p); err != nil {
 		return domain.Project{}, err
 	}

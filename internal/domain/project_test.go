@@ -12,16 +12,25 @@ func TestProjectValidate(t *testing.T) {
 	}
 
 	cases := map[string]Project{
-		"blank name":        {Name: " ", Slug: "n", RepoPath: "/abs/repo"},
-		"blank repo":        {Name: "n", Slug: "n", RepoPath: ""},
-		"relative repo":     {Name: "n", Slug: "n", RepoPath: "repo/x"},
-		"missing slug":      {Name: "n", Slug: "", RepoPath: "/abs/repo"},
-		"whitespace slug":   {Name: "n", Slug: "   ", RepoPath: "/abs/repo"},
-		"noncanonical slug": {Name: "n", Slug: "Not Canonical!", RepoPath: "/abs/repo"},
+		"blank name":    {Name: " ", Slug: "n", RepoPath: "/abs/repo"},
+		"blank repo":    {Name: "n", Slug: "n", RepoPath: ""},
+		"relative repo": {Name: "n", Slug: "n", RepoPath: "repo/x"},
+		"missing slug":  {Name: "n", Slug: "", RepoPath: "/abs/repo"},
 	}
 	for name, p := range cases {
 		if err := p.Validate(); !errors.Is(err, ErrInvalidProject) {
 			t.Errorf("%s: err = %v, want ErrInvalidProject", name, err)
+		}
+	}
+}
+
+func TestValidateSlug(t *testing.T) {
+	if err := ValidateSlug("good-slug"); err != nil {
+		t.Errorf("canonical slug rejected: %v", err)
+	}
+	for _, bad := range []string{"", "   ", "Not Canonical!", "Has Space"} {
+		if err := ValidateSlug(bad); !errors.Is(err, ErrInvalidProject) {
+			t.Errorf("ValidateSlug(%q) = %v, want ErrInvalidProject", bad, err)
 		}
 	}
 }
