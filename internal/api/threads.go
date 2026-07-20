@@ -130,8 +130,13 @@ func (s *Server) addThreadItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Return the updated view so the caller sees the current membership.
+	// Return the updated view so the caller sees the current membership. A
+	// concurrent thread delete between the add and this read surfaces as 404.
 	view, err := s.svc.GetThreadView(r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "thread not found")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

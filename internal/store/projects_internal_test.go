@@ -154,6 +154,33 @@ func TestProjectIDByEncodedCWDAmbiguous(t *testing.T) {
 	}
 }
 
+// Finding: a project with a legacy (noncanonical) slug can still update unrelated
+// fields (grandfathered), but changing to another noncanonical slug is rejected.
+func TestUpdateProjectGrandfathersLegacySlug(t *testing.T) {
+	s := openStore(t)
+	now := time.Now().UTC().Format(timeFmt)
+	if _, err := s.db.Exec(
+		`INSERT INTO projects (id, name, slug, repo_path, description, created_at, updated_at)
+		 VALUES ('p1', 'Name', 'Legacy Slug', '/repo/x', '', ?, ?)`, now, now); err != nil {
+		t.Fatalf("raw insert: %v", err)
+	}
+
+	// Unrelated update (name) must succeed despite the legacy slug.
+	if _, err := s.UpdateProjectTx("p1", func(p *domain.Project) error {
+		p.Name = "Renamed"
+		return nil
+	}); err != nil {
+		t.Errorf("unrelated update blocked by legacy slug: %v", err)
+	}
+	// Changing to another noncanonical slug must be rejected.
+	if _, err := s.UpdateProjectTx("p1", func(p *domain.Project) error {
+		p.Slug = "Another Bad!"
+		return nil
+	}); !errors.Is(err, domain.ErrInvalidProject) {
+		t.Errorf("noncanonical slug change: err = %v, want ErrInvalidProject", err)
+	}
+}
+
 // Finding: creating an issue in a nonexistent project must be rejected in-tx.
 func TestCreateIssueRejectsMissingProject(t *testing.T) {
 	s := openStore(t)
