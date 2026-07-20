@@ -40,16 +40,25 @@ func Load() (Config, error) {
 	cfg := defaults()
 
 	path := ConfigPath()
-	info, err := os.Stat(path)
+	// Open once and derive both the permission check and the decode from the same
+	// handle, so a concurrent replacement can't make us check one file and read
+	// the token from another (TOCTOU).
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cfg, nil
 		}
 		return Config{}, fmt.Errorf("reading config %s: %w", path, err)
 	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return Config{}, fmt.Errorf("reading config %s: %w", path, err)
+	}
 
 	var fc fileConfig
-	md, err := toml.DecodeFile(path, &fc)
+	md, err := toml.NewDecoder(f).Decode(&fc)
 	if err != nil {
 		return Config{}, fmt.Errorf("reading config %s: %w", path, err)
 	}
