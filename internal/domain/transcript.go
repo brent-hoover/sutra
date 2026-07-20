@@ -26,6 +26,7 @@ type Transcript struct {
 	SourcePath string    `json:"source_path"`
 	Title      string    `json:"title,omitempty"`
 	IssueID    *string   `json:"issue_id,omitempty"`
+	ProjectID  *string   `json:"project_id,omitempty"`
 	CapturedAt time.Time `json:"captured_at"`
 	CreatedAt  time.Time `json:"created_at"`
 	// SourceMtime is the mtime of the .jsonl file at ingest — the session's

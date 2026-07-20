@@ -98,6 +98,48 @@ them. Timestamps are UTC. IDs are short stable identifiers (kata-style).
   - `issue_id` references an existing Issue (no issue-type restriction).
   - `content` is non-empty.
 
+### Project
+
+A first-class container for work in one repository (1 project = 1 repo). Issues
+and threads may be scoped to a project (nullable `project_id`); transcripts
+auto-associate to the project whose `repo_path` matches the session's cwd.
+
+| field | type | required | notes |
+|-------|------|----------|-------|
+| `id` | string | yes | generated |
+| `name` | string | yes | |
+| `slug` | string | yes | **unique**; defaults to a slugified name |
+| `repo_path` | string | yes | **unique**; absolute repo path (the match key for transcript auto-association) |
+| `description` | string | no | |
+| `created_at` | timestamp | yes | |
+| `updated_at` | timestamp | yes | |
+
+- **Invariants:** slug and repo_path are unique. Deleting a project detaches its
+  references (issues, threads, transcripts have their `project_id` cleared) — no
+  cascade deletes.
+
+### Thread
+
+A meta-object tying together the pieces of one line of work. Membership is
+many-to-many across four kinds; a thread may be scoped to a project.
+
+| field | type | required | notes |
+|-------|------|----------|-------|
+| `id` | string | yes | generated |
+| `project_id` | string → Project | no | nullable scope |
+| `title` | string | yes | |
+| `body` | string | no | notes |
+| `status` | enum | yes | `active` \| `archived` (default `active`) |
+| `created_at` | timestamp | yes | |
+| `updated_at` | timestamp | yes | |
+
+**ThreadItem** (join `thread_item`): `thread_id`, `kind`
+(`issue` \| `document` \| `transcript` \| `comment`), `item_id`, `added_at`,
+UNIQUE(thread_id, kind, item_id).
+
+- **Invariants:** an attached item's kind must be known and the item must exist.
+  Deleting a thread removes its memberships but leaves the referenced items.
+
 ### Transcript
 - **Module:** `domain`
 - A captured Claude session — the container for its Messages. Ingested from

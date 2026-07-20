@@ -11,7 +11,20 @@ import (
 // CreateIssue validates input, applies defaults, persists the issue with a
 // "created" ledger entry, and returns the stored issue.
 func (s *Service) CreateIssue(subject, body string) (domain.Issue, error) {
-	return s.createIssue(subject, body, nil)
+	return s.createIssue(subject, body, nil, nil)
+}
+
+// CreateIssueInProject creates an issue scoped to a project (projectID may be
+// empty for none). The project must exist. Returns ErrNotFound if it is missing.
+func (s *Service) CreateIssueInProject(subject, body, projectID string) (domain.Issue, error) {
+	var pid *string
+	if projectID != "" {
+		if _, err := s.store.GetProject(projectID); err != nil {
+			return domain.Issue{}, err
+		}
+		pid = &projectID
+	}
+	return s.createIssue(subject, body, nil, pid)
 }
 
 // CreateChildIssue creates an issue whose parent_id is set to parentID. The
@@ -22,10 +35,10 @@ func (s *Service) CreateChildIssue(subject, body, parentID string) (domain.Issue
 	if _, err := s.store.GetIssue(parentID); err != nil {
 		return domain.Issue{}, err
 	}
-	return s.createIssue(subject, body, &parentID)
+	return s.createIssue(subject, body, &parentID, nil)
 }
 
-func (s *Service) createIssue(subject, body string, parentID *string) (domain.Issue, error) {
+func (s *Service) createIssue(subject, body string, parentID, projectID *string) (domain.Issue, error) {
 	now := time.Now().UTC()
 	issue := domain.Issue{
 		ID:        domain.NewID(),
@@ -35,6 +48,7 @@ func (s *Service) createIssue(subject, body string, parentID *string) (domain.Is
 		Status:    domain.StatusOpen,
 		Priority:  domain.P2,
 		ParentID:  parentID,
+		ProjectID: projectID,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}

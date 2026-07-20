@@ -46,6 +46,19 @@ func (c *Client) CreateChildIssue(ctx context.Context, subject, body, parentID s
 	return c.doIssue(req, http.StatusCreated)
 }
 
+// CreateIssueInProject creates an issue scoped to a project in one request.
+func (c *Client) CreateIssueInProject(ctx context.Context, subject, body, projectID string) (IssueResult, error) {
+	payload, err := json.Marshal(map[string]string{"subject": subject, "body": body, "project_id": projectID})
+	if err != nil {
+		return IssueResult{}, err
+	}
+	req, err := c.newRequest(ctx, http.MethodPost, "/issues", bytes.NewReader(payload))
+	if err != nil {
+		return IssueResult{}, err
+	}
+	return c.doIssue(req, http.StatusCreated)
+}
+
 // GetIssue fetches an issue by id via the daemon.
 func (c *Client) GetIssue(ctx context.Context, id string) (IssueResult, error) {
 	req, err := c.newRequest(ctx, http.MethodGet, "/issues/"+url.PathEscape(id), nil)

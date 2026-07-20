@@ -20,11 +20,11 @@ func (s *Store) CreateIssue(issue domain.Issue, ledger []domain.LedgerEntry) err
 	defer tx.Rollback()
 
 	if _, err := tx.Exec(
-		`INSERT INTO issues (id, subject, body, type, status, priority, owner, parent_id, deleted_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO issues (id, subject, body, type, status, priority, owner, parent_id, project_id, deleted_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		issue.ID, issue.Subject, issue.Body, string(issue.Type), string(issue.Status),
-		string(issue.Priority), issue.Owner, nullString(issue.ParentID), nullTime(issue.DeletedAt),
-		issue.CreatedAt.Format(timeFmt), issue.UpdatedAt.Format(timeFmt),
+		string(issue.Priority), issue.Owner, nullString(issue.ParentID), nullString(issue.ProjectID),
+		nullTime(issue.DeletedAt), issue.CreatedAt.Format(timeFmt), issue.UpdatedAt.Format(timeFmt),
 	); err != nil {
 		return fmt.Errorf("insert issue: %w", err)
 	}
@@ -90,7 +90,7 @@ func (s *Store) UpdateIssueTx(id string, mutate func(issue *domain.Issue) ([]dom
 	return issue, nil
 }
 
-const issueColumns = `id, subject, body, type, status, priority, owner, parent_id, deleted_at, created_at, updated_at`
+const issueColumns = `id, subject, body, type, status, priority, owner, parent_id, project_id, deleted_at, created_at, updated_at`
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows.
 type rowScanner interface {
@@ -102,12 +102,13 @@ func scanIssue(sc rowScanner) (domain.Issue, error) {
 	var (
 		issue                 domain.Issue
 		typ, status, priority string
-		parentID, deletedAt   sql.NullString
+		parentID, projectID   sql.NullString
+		deletedAt             sql.NullString
 		createdAt, updatedAt  string
 	)
 	if err := sc.Scan(
 		&issue.ID, &issue.Subject, &issue.Body, &typ, &status, &priority, &issue.Owner,
-		&parentID, &deletedAt, &createdAt, &updatedAt,
+		&parentID, &projectID, &deletedAt, &createdAt, &updatedAt,
 	); err != nil {
 		return domain.Issue{}, err
 	}
@@ -116,6 +117,9 @@ func scanIssue(sc rowScanner) (domain.Issue, error) {
 	issue.Priority = domain.Priority(priority)
 	if parentID.Valid {
 		issue.ParentID = &parentID.String
+	}
+	if projectID.Valid {
+		issue.ProjectID = &projectID.String
 	}
 	if deletedAt.Valid {
 		t, err := time.Parse(timeFmt, deletedAt.String)
@@ -185,6 +189,10 @@ func (s *Store) ListIssues(f domain.IssueFilter) ([]domain.Issue, error) {
 	if f.Label != "" {
 		q += " AND id IN (SELECT issue_id FROM issue_label WHERE label = ?)"
 		args = append(args, f.Label)
+	}
+	if f.ProjectID != "" {
+		q += " AND project_id = ?"
+		args = append(args, f.ProjectID)
 	}
 	q += " ORDER BY created_at, id"
 

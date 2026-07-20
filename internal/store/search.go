@@ -338,7 +338,7 @@ func getMessage(q querier, id string) (domain.Message, error) {
 // transcriptMeta returns a transcript without its messages.
 func transcriptMeta(q querier, id string) (domain.Transcript, error) {
 	return scanTranscript(q.QueryRow(
-		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime
+		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime, project_id
 		 FROM transcripts WHERE id = ?`, id))
 }
 

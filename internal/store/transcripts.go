@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS transcripts (
     issue_id     TEXT,
     captured_at  TEXT NOT NULL,
     created_at   TEXT NOT NULL,
-    source_mtime TEXT NOT NULL DEFAULT ''
+    source_mtime TEXT NOT NULL DEFAULT '',
+    project_id   TEXT
 );
 CREATE TABLE IF NOT EXISTS messages (
     id            TEXT PRIMARY KEY,
@@ -120,8 +121,8 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		// touching a timestamp-less file (captured_at derived from mtime) would
 		// silently move the recorded start time.
 		if _, err := tx.Exec(
-			`UPDATE transcripts SET source_path = ?, title = ?, source_mtime = ? WHERE id = ?`,
-			t.SourcePath, t.Title, mtimeStr(t.SourceMtime), t.ID,
+			`UPDATE transcripts SET source_path = ?, title = ?, source_mtime = ?, project_id = ? WHERE id = ?`,
+			t.SourcePath, t.Title, mtimeStr(t.SourceMtime), nullString(t.ProjectID), t.ID,
 		); err != nil {
 			return domain.Transcript{}, fmt.Errorf("update transcript: %w", err)
 		}
@@ -138,10 +139,10 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		logReingest = existingIssueID.Valid
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := tx.Exec(
-			`INSERT INTO transcripts (id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO transcripts (id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime, project_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			t.ID, t.SessionID, t.SourcePath, t.Title, nullString(t.IssueID),
-			t.CapturedAt.Format(timeFmt), t.CreatedAt.Format(timeFmt), mtimeStr(t.SourceMtime),
+			t.CapturedAt.Format(timeFmt), t.CreatedAt.Format(timeFmt), mtimeStr(t.SourceMtime), nullString(t.ProjectID),
 		); err != nil {
 			return domain.Transcript{}, fmt.Errorf("insert transcript: %w", err)
 		}
@@ -205,7 +206,7 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 // seq order, or ErrNotFound.
 func (s *Store) GetTranscript(id string) (domain.Transcript, error) {
 	t, err := scanTranscript(s.db.QueryRow(
-		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime
+		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime, project_id
 		 FROM transcripts WHERE id = ?`, id))
 	if err != nil {
 		return domain.Transcript{}, err
@@ -284,7 +285,7 @@ func (s *Store) LinkTranscript(transcriptID, issueID string, entry domain.Ledger
 // messages), ordered by capture time.
 func (s *Store) TranscriptsForIssue(issueID string) ([]domain.Transcript, error) {
 	rows, err := s.db.Query(
-		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime
+		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime, project_id
 		 FROM transcripts WHERE issue_id = ? ORDER BY captured_at`, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("query transcripts: %w", err)
@@ -324,11 +325,11 @@ func (s *Store) IngestedSessionIDs() (map[string]bool, error) {
 func scanTranscript(row rowScanner) (domain.Transcript, error) {
 	var (
 		t                     domain.Transcript
-		issueID               sql.NullString
+		issueID, projectID    sql.NullString
 		capturedAt, createdAt string
 		sourceMtime           string
 	)
-	err := row.Scan(&t.ID, &t.SessionID, &t.SourcePath, &t.Title, &issueID, &capturedAt, &createdAt, &sourceMtime)
+	err := row.Scan(&t.ID, &t.SessionID, &t.SourcePath, &t.Title, &issueID, &capturedAt, &createdAt, &sourceMtime, &projectID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Transcript{}, domain.ErrNotFound
 	}
@@ -337,6 +338,9 @@ func scanTranscript(row rowScanner) (domain.Transcript, error) {
 	}
 	if issueID.Valid {
 		t.IssueID = &issueID.String
+	}
+	if projectID.Valid {
+		t.ProjectID = &projectID.String
 	}
 	if t.CapturedAt, err = time.Parse(timeFmt, capturedAt); err != nil {
 		return domain.Transcript{}, fmt.Errorf("parse captured_at: %w", err)

@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS issues (
     priority   TEXT NOT NULL,
     owner      TEXT NOT NULL DEFAULT '',
     parent_id  TEXT,
+    project_id TEXT,
     deleted_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -134,6 +135,12 @@ CREATE INDEX IF NOT EXISTS idx_documents_issue_id ON documents (issue_id);`
 		return err
 	}
 	if err := s.migrateLabels(); err != nil {
+		return err
+	}
+	if err := s.migrateProjects(); err != nil {
+		return err
+	}
+	if err := s.migrateThreads(); err != nil {
 		return err
 	}
 	// Search depends on the issues, documents, and messages tables existing, so

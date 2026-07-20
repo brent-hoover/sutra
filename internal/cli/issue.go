@@ -13,12 +13,19 @@ import (
 )
 
 func createCmd(cfg config.Config) *cobra.Command {
-	var subject, body string
+	var subject, body, project string
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create an issue",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := client.New(cfg).CreateIssue(cmd.Context(), subject, body)
+			c := client.New(cfg)
+			var res client.IssueResult
+			var err error
+			if project != "" {
+				res, err = c.CreateIssueInProject(cmd.Context(), subject, body, project)
+			} else {
+				res, err = c.CreateIssue(cmd.Context(), subject, body)
+			}
 			if err != nil {
 				return err
 			}
@@ -27,6 +34,7 @@ func createCmd(cfg config.Config) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&subject, "subject", "", "issue subject (required)")
 	cmd.Flags().StringVar(&body, "body", "", "issue body (required)")
+	cmd.Flags().StringVar(&project, "project", "", "scope the issue to a project id")
 	_ = cmd.MarkFlagRequired("subject")
 	_ = cmd.MarkFlagRequired("body")
 	return cmd
@@ -48,7 +56,7 @@ func viewCmd(cfg config.Config) *cobra.Command {
 }
 
 func listCmd(cfg config.Config) *cobra.Command {
-	var status, typ, priority, owner, label string
+	var status, typ, priority, owner, label, project string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List issues (soft-deleted excluded)",
@@ -59,6 +67,7 @@ func listCmd(cfg config.Config) *cobra.Command {
 				"priority": priority,
 				"owner":    owner,
 				"label":    label,
+				"project":  project,
 			}
 			res, err := client.New(cfg).ListIssues(cmd.Context(), filters)
 			if err != nil {
@@ -72,6 +81,7 @@ func listCmd(cfg config.Config) *cobra.Command {
 	cmd.Flags().StringVar(&priority, "priority", "", "filter by priority")
 	cmd.Flags().StringVar(&owner, "owner", "", "filter by owner")
 	cmd.Flags().StringVar(&label, "label", "", "filter by label")
+	cmd.Flags().StringVar(&project, "project", "", "filter by project id")
 	return cmd
 }
 

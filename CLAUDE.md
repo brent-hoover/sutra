@@ -109,6 +109,8 @@ slices; `data-models.md` is the schema source of truth.
 ## Status
 
 Slices 1–8 are implemented, individually roborev-passed, and merged to
-`develop`. Slice 9 (`activity` feed — a reverse-chronological view across issue
-changes and captured transcripts, auto-ingesting recent Claude sessions first)
-is built on top. Not yet done: deploy to the LAN server box.
+`develop`. Built on top since: slice 9 (`activity` feed), slice 10 (`project`
+entity — 1 project = 1 repo; nullable `project_id` on issues/threads;
+transcripts auto-associate by matching their session cwd to `repo_path`), and
+slice 11 (`thread` meta-object grouping issues/documents/transcripts/comments
+many-to-many). Not yet done: deploy to the LAN server box.

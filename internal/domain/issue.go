@@ -65,11 +65,12 @@ func (p Priority) Valid() bool {
 // IssueFilter narrows a list query. A zero-value field imposes no constraint;
 // filters combine with AND.
 type IssueFilter struct {
-	Status   Status
-	Type     IssueType
-	Priority Priority
-	Owner    string
-	Label    string // free-text label; matches issues carrying it in issue_label
+	Status    Status
+	Type      IssueType
+	Priority  Priority
+	Owner     string
+	Label     string // free-text label; matches issues carrying it in issue_label
+	ProjectID string // scope to a single project
 }
 
 // ErrInvalidIssue is returned when an issue fails validation.
@@ -85,6 +86,7 @@ type Issue struct {
 	Priority  Priority   `json:"priority"`
 	Owner     string     `json:"owner,omitempty"`
 	ParentID  *string    `json:"parent_id,omitempty"`
+	ProjectID *string    `json:"project_id,omitempty"`
 	Labels    []string   `json:"labels,omitempty"`
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`

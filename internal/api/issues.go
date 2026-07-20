@@ -27,9 +27,10 @@ func decodeBody(r *http.Request, dst any) error {
 }
 
 type createIssueRequest struct {
-	Subject  string  `json:"subject"`
-	Body     string  `json:"body"`
-	ParentID *string `json:"parent_id"`
+	Subject   string  `json:"subject"`
+	Body      string  `json:"body"`
+	ParentID  *string `json:"parent_id"`
+	ProjectID *string `json:"project_id"`
 }
 
 func (s *Server) createIssue(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +41,8 @@ func (s *Server) createIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	var issue domain.Issue
 	var err error
-	if req.ParentID != nil {
+	switch {
+	case req.ParentID != nil:
 		// A supplied parent_id (even empty) must reference an existing issue;
 		// only an absent field means "no parent".
 		issue, err = s.svc.CreateChildIssue(req.Subject, req.Body, *req.ParentID)
@@ -48,7 +50,13 @@ func (s *Server) createIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "parent issue not found")
 			return
 		}
-	} else {
+	case req.ProjectID != nil:
+		issue, err = s.svc.CreateIssueInProject(req.Subject, req.Body, *req.ProjectID)
+		if errors.Is(err, domain.ErrNotFound) {
+			writeError(w, http.StatusBadRequest, "project not found")
+			return
+		}
+	default:
 		issue, err = s.svc.CreateIssue(req.Subject, req.Body)
 	}
 	if errors.Is(err, domain.ErrInvalidIssue) {
@@ -78,11 +86,12 @@ func (s *Server) listIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	issues, err := s.svc.ListIssues(domain.IssueFilter{
-		Status:   domain.Status(q.Get("status")),
-		Type:     domain.IssueType(q.Get("type")),
-		Priority: domain.Priority(q.Get("priority")),
-		Owner:    q.Get("owner"),
-		Label:    q.Get("label"), // free-text; no enum validation
+		Status:    domain.Status(q.Get("status")),
+		Type:      domain.IssueType(q.Get("type")),
+		Priority:  domain.Priority(q.Get("priority")),
+		Owner:     q.Get("owner"),
+		Label:     q.Get("label"), // free-text; no enum validation
+		ProjectID: q.Get("project"),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

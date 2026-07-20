@@ -73,6 +73,20 @@ func Handler(svc *service.Service) http.Handler {
 	// recent sessions (a persistent write), so the endpoint is state-changing and
 	// must not be reachable by safe-method prefetchers/crawlers.
 	mux.HandleFunc("POST /activity", s.activity)
+	// Projects (slice 10).
+	mux.HandleFunc("POST /projects", s.createProject)
+	mux.HandleFunc("GET /projects", s.listProjects)
+	mux.HandleFunc("GET /projects/{id}", s.getProject)
+	mux.HandleFunc("PATCH /projects/{id}", s.updateProject)
+	mux.HandleFunc("DELETE /projects/{id}", s.deleteProject)
+	// Threads (slice 11).
+	mux.HandleFunc("POST /threads", s.createThread)
+	mux.HandleFunc("GET /threads", s.listThreads)
+	mux.HandleFunc("GET /threads/{id}", s.getThread)
+	mux.HandleFunc("PATCH /threads/{id}", s.updateThread)
+	mux.HandleFunc("DELETE /threads/{id}", s.deleteThread)
+	mux.HandleFunc("POST /threads/{id}/items", s.addThreadItem)
+	mux.HandleFunc("DELETE /threads/{id}/items", s.removeThreadItem)
 	return mux
 }
 
