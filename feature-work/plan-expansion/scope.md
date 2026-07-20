@@ -40,7 +40,7 @@ Delivered as two slices:
 ## Out of scope / non-goals
 
 * Any plan **document** handling (parse/approve/expand a `Document{Kind:"plan"}`) —
-  the superseded design at `docs/superpowers/specs/2026-07-20-plan-expansion-design.md`.
+  the earlier plan-document approach, now superseded.
 * Non-linear dependency graphs; only a sequential chain.
 * TUI authoring of tracer items or the `plan build` flow (CLI/agent only).
 * Un-approving; auto-closing the plan when tracers close; `resolution` (why an

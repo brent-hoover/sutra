@@ -93,8 +93,8 @@ no way to derive structured steps from that prose.
 
 - **Storing, approving, or expanding a separate plan _document_.** The plan is now
   a first-class issue type, not a `Document{Kind:"plan"}`. The earlier
-  approve/expand-a-plan-doc design (`docs/superpowers/specs/2026-07-20-plan-expansion-design.md`)
-  is superseded by this one. (Other DDD docs — problem/design/scenarios — may
+  approve/expand-a-plan-doc design is superseded by this one. (Other DDD docs —
+  problem/design/scenarios — may
   still attach to the plan issue as documents; that is unchanged and out of scope
   here.)
 - Non-linear dependency graphs between items (only a straight sequential chain).
