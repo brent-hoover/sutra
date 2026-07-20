@@ -41,6 +41,11 @@ func (p Project) Validate() error {
 	if p.Slug == "" {
 		return errors.Join(ErrInvalidProject, errors.New("slug is required"))
 	}
+	// The slug is advertised as URL-safe, so a caller-supplied slug must already
+	// be canonical (lowercase, hyphen-separated, no stray characters).
+	if p.Slug != Slugify(p.Slug) {
+		return errors.Join(ErrInvalidProject, fmt.Errorf("slug %q is not url-safe (want %q)", p.Slug, Slugify(p.Slug)))
+	}
 	return nil
 }
 

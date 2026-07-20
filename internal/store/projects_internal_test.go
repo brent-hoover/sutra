@@ -128,6 +128,32 @@ func TestCreateProjectRejectsEncodedCollision(t *testing.T) {
 	}
 }
 
+// Finding: in a legacy database with colliding encoded paths (predating the
+// collision guard), ProjectIDByEncodedCWD must return no match rather than pick
+// one, regardless of insertion order.
+func TestProjectIDByEncodedCWDAmbiguous(t *testing.T) {
+	s := openStore(t)
+	now := time.Now().UTC().Format(timeFmt)
+	// Insert two colliding rows directly, bypassing CreateProject's guard.
+	insert := func(id, slug, repo string) {
+		if _, err := s.db.Exec(
+			`INSERT INTO projects (id, name, slug, repo_path, description, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, '', ?, ?)`, id, slug, slug, repo, now, now); err != nil {
+			t.Fatalf("raw insert %s: %v", slug, err)
+		}
+	}
+	insert("p1", "one", "/foo/bar-baz")
+	insert("p2", "two", "/foo-bar/baz") // same EncodeCWD as p1
+
+	got, err := s.ProjectIDByEncodedCWD(domain.EncodeCWD("/foo/bar-baz"))
+	if err != nil {
+		t.Fatalf("match: %v", err)
+	}
+	if got != "" {
+		t.Errorf("ambiguous encoded cwd resolved to %q, want no match", got)
+	}
+}
+
 // Finding: creating an issue in a nonexistent project must be rejected in-tx.
 func TestCreateIssueRejectsMissingProject(t *testing.T) {
 	s := openStore(t)

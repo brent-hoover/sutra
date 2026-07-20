@@ -30,6 +30,7 @@ them. Timestamps are UTC. IDs are short stable identifiers (kata-style).
 | `priority` | enum | no | `p0` \| `p1` \| `p2` \| `p3`; default `p2` |
 | `owner` | string | no | the **agent** assigned to the issue (agent-assisted dev), not a human user |
 | `parent_id` | string → Issue | no | parent in the parent/child tree |
+| `project_id` | string → Project | no | nullable project scope; cleared (with a ledger entry) if the project is deleted |
 | `labels` | []string | no | read-derived view over the `issue_label` join; free-text tags |
 | `deleted_at` | timestamp | no | null = live; set = soft-deleted |
 | `created_at` | timestamp | yes | set on create |
@@ -39,6 +40,8 @@ them. Timestamps are UTC. IDs are short stable identifiers (kata-style).
   - `subject` and `body` are non-empty.
   - `parent_id`, if set, references an existing Issue and must not create a
     cycle in the parent/child tree.
+  - `project_id`, if set, references an existing Project (validated in the insert
+    transaction).
   - An Issue cannot be its own parent.
   - A soft-deleted Issue (`deleted_at` set) is excluded from default lists
     and search.
@@ -153,6 +156,7 @@ UNIQUE(thread_id, kind, item_id).
 | `source_path` | string | yes | absolute path of the source JSONL |
 | `title` | string | no | derived from first user message |
 | `issue_id` | string → Issue | no | linked issue (nullable; linked after ingest) |
+| `project_id` | string → Project | no | nullable; auto-set on ingest when the session's cwd matches a project's repo path; cleared if that project is deleted |
 | `captured_at` | timestamp | yes | when the session started: first event timestamp / file mtime |
 | `created_at` | timestamp | yes | when ingested |
 | `source_mtime` | timestamp | no | source file mtime at ingest (last-modified time); bounds which sessions are recent candidates for auto-ingest and places the session in the activity feed's window (change detection uses a message-content signature, not mtime) |
@@ -161,6 +165,8 @@ UNIQUE(thread_id, kind, item_id).
   - `session_id` is unique — re-ingesting the same session updates in place
     (idempotent), never duplicates.
   - `issue_id`, if set, references an existing Issue.
+  - `project_id`, if set, references an existing Project; an ambiguous cwd match
+    (legacy encoded-path collision) leaves it null rather than guessing.
 
 ### Message
 - **Module:** `domain`
@@ -211,4 +217,11 @@ erDiagram
     ISSUE }o--o{ ISSUE : related
     ISSUE }o--o{ ISSUE : blocks
     TRANSCRIPT ||--o{ MESSAGE : contains
+    PROJECT ||--o{ ISSUE : scopes
+    PROJECT ||--o{ THREAD : scopes
+    PROJECT ||--o{ TRANSCRIPT : "auto-associates"
+    THREAD }o--o{ ISSUE : groups
+    THREAD }o--o{ DOCUMENT : groups
+    THREAD }o--o{ TRANSCRIPT : groups
+    THREAD }o--o{ COMMENT : groups
 ```

@@ -12,10 +12,12 @@ func TestProjectValidate(t *testing.T) {
 	}
 
 	cases := map[string]Project{
-		"blank name":    {Name: " ", Slug: "n", RepoPath: "/abs/repo"},
-		"blank repo":    {Name: "n", Slug: "n", RepoPath: ""},
-		"relative repo": {Name: "n", Slug: "n", RepoPath: "repo/x"},
-		"missing slug":  {Name: "n", Slug: "", RepoPath: "/abs/repo"},
+		"blank name":        {Name: " ", Slug: "n", RepoPath: "/abs/repo"},
+		"blank repo":        {Name: "n", Slug: "n", RepoPath: ""},
+		"relative repo":     {Name: "n", Slug: "n", RepoPath: "repo/x"},
+		"missing slug":      {Name: "n", Slug: "", RepoPath: "/abs/repo"},
+		"whitespace slug":   {Name: "n", Slug: "   ", RepoPath: "/abs/repo"},
+		"noncanonical slug": {Name: "n", Slug: "Not Canonical!", RepoPath: "/abs/repo"},
 	}
 	for name, p := range cases {
 		if err := p.Validate(); !errors.Is(err, ErrInvalidProject) {
