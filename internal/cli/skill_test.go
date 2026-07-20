@@ -123,28 +123,33 @@ func TestWriteSkillConcurrent(t *testing.T) {
 	}
 }
 
-// A failed install must not truncate or destroy existing content: the atomic
-// temp-then-rename keeps it intact. The failure is triggered deterministically
-// (cross-platform, privilege-independent) by making the destination a non-empty
-// directory so the final rename cannot succeed.
+// A failed install must not truncate or destroy an existing regular SKILL.md:
+// the atomic temp-then-rename keeps it intact. A deterministic rename failure is
+// injected so the test is privilege- and platform-independent and specifically
+// exercises the atomic-rename path (a naive direct-write impl would fail it).
 func TestWriteSkillPreservesExistingOnFailure(t *testing.T) {
 	target := t.TempDir()
-	skillDir := filepath.Join(target, "graphify")
-	mdDir := filepath.Join(skillDir, "SKILL.md")
-	if err := os.MkdirAll(mdDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	keep := filepath.Join(mdDir, "keep.txt")
-	if err := os.WriteFile(keep, []byte("keep"), 0o644); err != nil {
-		t.Fatalf("write existing: %v", err)
+	if _, err := writeSkill(target, "graphify", "original"); err != nil {
+		t.Fatalf("first install: %v", err)
 	}
 
-	if _, err := writeSkill(target, "graphify", "replacement"); err == nil {
-		t.Fatal("expected rename over a non-empty directory to fail")
+	orig := renameInRoot
+	renameInRoot = func(root *os.Root, oldname, newname string) error {
+		return fmt.Errorf("injected rename failure")
 	}
-	// Existing content survives untouched.
-	if got, err := os.ReadFile(keep); err != nil || string(got) != "keep" {
-		t.Errorf("existing content not preserved: got %q err %v", got, err)
+	t.Cleanup(func() { renameInRoot = orig })
+
+	if _, err := writeSkill(target, "graphify", "replacement"); err == nil {
+		t.Fatal("expected injected rename failure")
+	}
+	// The existing regular file is untouched.
+	skillDir := filepath.Join(target, "graphify")
+	got, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read existing: %v", err)
+	}
+	if string(got) != "original" {
+		t.Errorf("existing skill corrupted on failed install: %q, want %q", got, "original")
 	}
 	// The failed install left no temp file behind.
 	entries, _ := os.ReadDir(skillDir)

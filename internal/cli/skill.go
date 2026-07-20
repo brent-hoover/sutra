@@ -260,9 +260,15 @@ func writeSkill(target, slug, content string) (string, error) {
 		root.Remove(tmpRel)
 		return "", err
 	}
-	if err := root.Rename(tmpRel, rel); err != nil {
+	if err := renameInRoot(root, tmpRel, rel); err != nil {
 		root.Remove(tmpRel)
 		return "", err
 	}
 	return filepath.Join(target, rel), nil
+}
+
+// renameInRoot performs the atomic rename within the pinned root. It is a
+// package var so tests can inject a deterministic rename failure.
+var renameInRoot = func(root *os.Root, oldname, newname string) error {
+	return root.Rename(oldname, newname)
 }
