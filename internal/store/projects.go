@@ -91,25 +91,34 @@ func ensureNoEncodedCollision(tx *sql.Tx, repoPath, excludeID string) error {
 	return rows.Err()
 }
 
-// ProjectIDByRepoPath returns the id of the project whose repo path encodes to
-// the same folder as the given encoded cwd, or "" if none. (Encodings are
-// unique across projects, enforced by ensureNoEncodedCollision.)
+// ProjectIDByEncodedCWD returns the id of the project whose repo path encodes to
+// the same folder as encodedCWD, or "" if none. New projects can't collide
+// (ensureNoEncodedCollision), but a database predating that check might; rather
+// than pick one non-deterministically, an ambiguous match returns "" (no
+// association) so ingest never guesses wrong.
 func (s *Store) ProjectIDByEncodedCWD(encodedCWD string) (string, error) {
 	rows, err := s.db.Query(`SELECT id, repo_path FROM projects`)
 	if err != nil {
 		return "", fmt.Errorf("match project by cwd: %w", err)
 	}
 	defer rows.Close()
+	var match string
 	for rows.Next() {
 		var id, rp string
 		if err := rows.Scan(&id, &rp); err != nil {
 			return "", err
 		}
 		if domain.EncodeCWD(rp) == encodedCWD {
-			return id, nil
+			if match != "" {
+				return "", nil // ambiguous (legacy collision): don't guess
+			}
+			match = id
 		}
 	}
-	return "", rows.Err()
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return match, nil
 }
 
 // GetProject returns a project by id, or ErrNotFound.
