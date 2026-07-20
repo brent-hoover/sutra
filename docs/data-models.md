@@ -111,8 +111,9 @@ them. Timestamps are UTC. IDs are short stable identifiers (kata-style).
 | `source_path` | string | yes | absolute path of the source JSONL |
 | `title` | string | no | derived from first user message |
 | `issue_id` | string → Issue | no | linked issue (nullable; linked after ingest) |
-| `captured_at` | timestamp | yes | from file mtime / first event |
+| `captured_at` | timestamp | yes | when the session started: first event timestamp / file mtime |
 | `created_at` | timestamp | yes | when ingested |
+| `source_mtime` | timestamp | no | source file mtime at ingest (last-modified time); used to skip re-ingesting unchanged sessions and to place the session in the activity feed's window |
 
 - **Invariants:**
   - `session_id` is unique — re-ingesting the same session updates in place

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +73,11 @@ func parseWindowDuration(s string) (time.Duration, error) {
 		}
 		if days < 0 {
 			return 0, fmt.Errorf("negative days: %s", s)
+		}
+		// Guard the days→duration multiplication against int64 overflow, which
+		// would otherwise wrap to a negative (future) window.
+		if int64(days) > math.MaxInt64/int64(24*time.Hour) {
+			return 0, fmt.Errorf("window too large: %s", s)
 		}
 		return time.Duration(days) * 24 * time.Hour, nil
 	}
