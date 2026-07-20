@@ -29,8 +29,9 @@ type Transcript struct {
 	CapturedAt time.Time `json:"captured_at"`
 	CreatedAt  time.Time `json:"created_at"`
 	// SourceMtime is the mtime of the .jsonl file at ingest — the session's
-	// last-modified time. Used to detect unchanged sessions (skip re-ingest) and
-	// to place the session in the activity feed's window.
+	// last-modified time. It bounds which sessions are recent candidates for
+	// auto-ingest and places the session in the activity feed's window. It is not
+	// used for change detection (that compares message-content signatures).
 	SourceMtime time.Time `json:"source_mtime"`
 	Messages    []Message `json:"messages,omitempty"`
 }

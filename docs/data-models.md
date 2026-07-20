@@ -113,7 +113,7 @@ them. Timestamps are UTC. IDs are short stable identifiers (kata-style).
 | `issue_id` | string → Issue | no | linked issue (nullable; linked after ingest) |
 | `captured_at` | timestamp | yes | when the session started: first event timestamp / file mtime |
 | `created_at` | timestamp | yes | when ingested |
-| `source_mtime` | timestamp | no | source file mtime at ingest (last-modified time); used to skip re-ingesting unchanged sessions and to place the session in the activity feed's window |
+| `source_mtime` | timestamp | no | source file mtime at ingest (last-modified time); bounds which sessions are recent candidates for auto-ingest and places the session in the activity feed's window (change detection uses a message-content signature, not mtime) |
 
 - **Invariants:**
   - `session_id` is unique — re-ingesting the same session updates in place
