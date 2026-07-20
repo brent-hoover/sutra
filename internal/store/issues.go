@@ -33,11 +33,11 @@ func (s *Store) CreateIssue(issue domain.Issue, ledger []domain.LedgerEntry) err
 	}
 
 	if _, err := tx.Exec(
-		`INSERT INTO issues (id, subject, body, type, status, priority, owner, parent_id, project_id, deleted_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO issues (id, subject, body, type, status, priority, owner, parent_id, project_id, approval, deleted_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		issue.ID, issue.Subject, issue.Body, string(issue.Type), string(issue.Status),
 		string(issue.Priority), issue.Owner, nullString(issue.ParentID), nullString(issue.ProjectID),
-		nullTime(issue.DeletedAt), issue.CreatedAt.Format(timeFmt), issue.UpdatedAt.Format(timeFmt),
+		string(issue.Approval), nullTime(issue.DeletedAt), issue.CreatedAt.Format(timeFmt), issue.UpdatedAt.Format(timeFmt),
 	); err != nil {
 		return fmt.Errorf("insert issue: %w", err)
 	}
@@ -103,7 +103,7 @@ func (s *Store) UpdateIssueTx(id string, mutate func(issue *domain.Issue) ([]dom
 	return issue, nil
 }
 
-const issueColumns = `id, subject, body, type, status, priority, owner, parent_id, project_id, deleted_at, created_at, updated_at`
+const issueColumns = `id, subject, body, type, status, priority, owner, parent_id, project_id, approval, deleted_at, created_at, updated_at`
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows.
 type rowScanner interface {
@@ -115,19 +115,21 @@ func scanIssue(sc rowScanner) (domain.Issue, error) {
 	var (
 		issue                 domain.Issue
 		typ, status, priority string
+		approval              string
 		parentID, projectID   sql.NullString
 		deletedAt             sql.NullString
 		createdAt, updatedAt  string
 	)
 	if err := sc.Scan(
 		&issue.ID, &issue.Subject, &issue.Body, &typ, &status, &priority, &issue.Owner,
-		&parentID, &projectID, &deletedAt, &createdAt, &updatedAt,
+		&parentID, &projectID, &approval, &deletedAt, &createdAt, &updatedAt,
 	); err != nil {
 		return domain.Issue{}, err
 	}
 	issue.Type = domain.IssueType(typ)
 	issue.Status = domain.Status(status)
 	issue.Priority = domain.Priority(priority)
+	issue.Approval = domain.Approval(approval)
 	if parentID.Valid {
 		issue.ParentID = &parentID.String
 	}
