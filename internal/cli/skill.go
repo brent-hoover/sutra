@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -206,12 +207,8 @@ func skillInstallCmd(cfg config.Config) *cobra.Command {
 			if sk.Slug == "" || sk.Slug == "." || sk.Slug == ".." || strings.ContainsAny(sk.Slug, `/\`) {
 				return fmt.Errorf("refusing to install skill with unsafe slug %q", sk.Slug)
 			}
-			skillDir := filepath.Join(target, sk.Slug)
-			if err := os.MkdirAll(skillDir, 0o755); err != nil {
-				return err
-			}
-			path := filepath.Join(skillDir, "SKILL.md")
-			if err := os.WriteFile(path, []byte(sk.Content), 0o644); err != nil {
+			path, err := writeSkill(target, sk.Slug, sk.Content)
+			if err != nil {
 				return err
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "installed %s to %s\n", sk.Slug, path)
@@ -220,4 +217,34 @@ func skillInstallCmd(cfg config.Config) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "target skills directory (default: config skills_dir, else ~/.claude/skills)")
 	return cmd
+}
+
+// writeSkill writes content to <target>/<slug>/SKILL.md, creating target if
+// needed. It writes through a pinned os.Root at target, so a pre-existing
+// symlink at <slug> or SKILL.md that escapes target is refused rather than
+// followed (no writes outside the configured skills directory). Returns the
+// written path.
+func writeSkill(target, slug, content string) (string, error) {
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return "", err
+	}
+	root, err := os.OpenRoot(target)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+
+	if err := root.Mkdir(slug, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+		return "", err
+	}
+	rel := filepath.Join(slug, "SKILL.md")
+	f, err := root.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if _, err := f.WriteString(content); err != nil {
+		return "", err
+	}
+	return filepath.Join(target, rel), nil
 }
