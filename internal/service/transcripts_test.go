@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brent-hoover/sutra/internal/config"
 	"github.com/brent-hoover/sutra/internal/domain"
@@ -231,7 +232,11 @@ func TestRelinkIdempotentAndConflict(t *testing.T) {
 }
 
 // Re-ingesting a linked transcript must advance the owning issue's updated_at.
-func TestReingestLinkedBumpsIssueUpdatedAt(t *testing.T) {
+// Re-ingesting a linked transcript bumps its issue and records a ledger entry
+// ONLY when the session actually changed (newer file mtime). An unchanged
+// re-ingest is a no-op, so merely re-reading a session never manufactures
+// activity on its issue.
+func TestReingestLinkedBumpsIssueOnlyWhenChanged(t *testing.T) {
 	projectsDir := t.TempDir()
 	svc := newService(t, projectsDir)
 	path := writeSession(t, filepath.Join(projectsDir, "-Users-me-proj"), "reingestbump", sessionLines())
@@ -249,11 +254,29 @@ func TestReingestLinkedBumpsIssueUpdatedAt(t *testing.T) {
 	}
 	before := issueUpdatedAt(t, svc, iss.ID)
 
-	if _, err := svc.IngestTranscript(path); err != nil { // re-ingest same session
-		t.Fatalf("re-ingest: %v", err)
+	// Unchanged re-ingest: no bump, no ledger update.
+	if _, err := svc.IngestTranscript(path); err != nil {
+		t.Fatalf("re-ingest unchanged: %v", err)
 	}
-	after := issueUpdatedAt(t, svc, iss.ID)
-	if !after.After(before) {
-		t.Errorf("re-ingest did not advance linked issue updated_at: %s !> %s", after, before)
+	if got := issueUpdatedAt(t, svc, iss.ID); got.After(before) {
+		t.Errorf("unchanged re-ingest advanced updated_at: %s > %s", got, before)
+	}
+	if n := countLedger(t, svc, iss.ID, domain.LedgerUpdated); n != 0 {
+		t.Errorf("unchanged re-ingest wrote %d ledger updates, want 0", n)
+	}
+
+	// Changed session (newer mtime): bump + one ledger update.
+	newer := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, newer, newer); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+	if _, err := svc.IngestTranscript(path); err != nil {
+		t.Fatalf("re-ingest changed: %v", err)
+	}
+	if got := issueUpdatedAt(t, svc, iss.ID); !got.After(before) {
+		t.Errorf("changed re-ingest did not advance updated_at: %s !> %s", got, before)
+	}
+	if n := countLedger(t, svc, iss.ID, domain.LedgerUpdated); n != 1 {
+		t.Errorf("changed re-ingest wrote %d ledger updates, want 1", n)
 	}
 }

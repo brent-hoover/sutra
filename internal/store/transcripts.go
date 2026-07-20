@@ -85,15 +85,33 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 	// re-ingesting a linked transcript preserves its issue link.
 	var (
 		existingID, existingCreated string
+		existingMtime               string
 		existingIssueID             sql.NullString
 	)
-	err = tx.QueryRow(`SELECT id, created_at, issue_id FROM transcripts WHERE session_id = ?`, t.SessionID).
-		Scan(&existingID, &existingCreated, &existingIssueID)
+	// logReingest records whether this upsert is a genuine content change of a
+	// previously-recorded, issue-linked session, and thus warrants a ledger
+	// entry + issue bump below. It stays false for first ingests and for a
+	// first-time source_mtime backfill of a pre-source_mtime (migrated) row.
+	logReingest := false
+	err = tx.QueryRow(`SELECT id, created_at, issue_id, source_mtime FROM transcripts WHERE session_id = ?`, t.SessionID).
+		Scan(&existingID, &existingCreated, &existingIssueID, &existingMtime)
 	switch {
 	case err == nil:
 		t.ID = existingID
 		if t.CreatedAt, err = time.Parse(timeFmt, existingCreated); err != nil {
 			return domain.Transcript{}, fmt.Errorf("parse created_at: %w", err)
+		}
+		prevMtime, perr := parseMtime(existingMtime)
+		if perr != nil {
+			return domain.Transcript{}, fmt.Errorf("parse source_mtime: %w", perr)
+		}
+		// Authoritative unchanged check (inside the tx): if we already recorded an
+		// mtime and the incoming file is not newer, this is a no-op — do not touch
+		// messages or manufacture a ledger update. Being in the tx makes it safe
+		// against concurrent activity requests.
+		if !prevMtime.IsZero() && !t.SourceMtime.After(prevMtime) {
+			_ = tx.Rollback()
+			return s.GetTranscript(t.ID)
 		}
 		if _, err := tx.Exec(
 			`UPDATE transcripts SET source_path = ?, title = ?, captured_at = ?, source_mtime = ? WHERE id = ?`,
@@ -101,6 +119,9 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		); err != nil {
 			return domain.Transcript{}, fmt.Errorf("update transcript: %w", err)
 		}
+		// A genuine change of a session whose mtime we already knew. A migrated row
+		// (prevMtime zero) is merely being backfilled, not changed, so no ledger.
+		logReingest = existingIssueID.Valid && !prevMtime.IsZero()
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := tx.Exec(
 			`INSERT INTO transcripts (id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime)
@@ -139,9 +160,10 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		return domain.Transcript{}, fmt.Errorf("prune messages: %w", err)
 	}
 
-	// Re-ingesting a linked transcript changes content tied to its issue, so
-	// advance that issue's updated_at and record it in the ledger, in the same tx.
-	if existingIssueID.Valid {
+	// Re-ingesting a linked transcript with genuinely new content changes data
+	// tied to its issue, so advance that issue's updated_at and record it in the
+	// ledger, in the same tx. Unchanged re-ingests and backfills do not reach here.
+	if logReingest {
 		now := time.Now().UTC()
 		if _, err := tx.Exec(
 			`UPDATE issues SET updated_at = ? WHERE id = ?`,
