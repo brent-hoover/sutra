@@ -65,6 +65,8 @@ func Handler(svc *service.Service) http.Handler {
 	mux.HandleFunc("PUT /issues/{id}/parent", s.setParent)
 	mux.HandleFunc("POST /issues/{id}/relations", s.relateIssue)
 	mux.HandleFunc("POST /issues/{id}/blocks", s.blockIssue)
+	mux.HandleFunc("POST /issues/{id}/plan/approve", s.approvePlan)
+	mux.HandleFunc("POST /plans", s.buildPlan)
 	mux.HandleFunc("POST /issues/{id}/labels", s.addLabel)
 	mux.HandleFunc("DELETE /issues/{id}/labels", s.removeLabel)
 	// Search (slice 7).
