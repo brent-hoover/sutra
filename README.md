@@ -130,6 +130,20 @@ Full-text across issues, documents, and transcript messages (SQLite FTS5).
 sutra search <query> [--kind issue|document|message] [--issue <id>] [--limit <n>]
 ```
 
+### Activity ("what was I working on?")
+
+A reverse-chronological feed across issue changes and captured Claude
+transcripts, scoped to a time window — the Monday-morning catch-up view. It
+**auto-ingests** any Claude session modified within the window first, so recent
+work shows up even if you never ingested it manually.
+
+```bash
+sutra activity                       # last 3 days (default)
+sutra activity --since 24h           # a Go duration
+sutra activity --since 3d            # 'd' = days
+sutra activity --since 2026-07-17    # or a calendar date
+```
+
 ## Running on your LAN
 
 To reach the daemon from your other machines, bind a non-loopback address. A

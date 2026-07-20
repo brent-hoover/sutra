@@ -108,5 +108,7 @@ slices; `data-models.md` is the schema source of truth.
 
 ## Status
 
-All 8 slices are implemented, individually roborev-passed, and merged to
-`develop`. Not yet done: deploy to the LAN server box, push to a remote.
+Slices 1–8 are implemented, individually roborev-passed, and merged to
+`develop`. Slice 9 (`activity` feed — a reverse-chronological view across issue
+changes and captured transcripts, auto-ingesting recent Claude sessions first)
+is built on top. Not yet done: deploy to the LAN server box.

@@ -56,7 +56,8 @@ type Message struct {
 // DiscoveredTranscript is a Claude session file found on disk, with whether
 // it has already been ingested. It is not persisted.
 type DiscoveredTranscript struct {
-	SessionID string `json:"session_id"`
-	Path      string `json:"path"`
-	Ingested  bool   `json:"ingested"`
+	SessionID string    `json:"session_id"`
+	Path      string    `json:"path"`
+	Ingested  bool      `json:"ingested"`
+	ModTime   time.Time `json:"mod_time"`
 }

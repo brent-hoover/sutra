@@ -69,6 +69,8 @@ func Handler(svc *service.Service) http.Handler {
 	mux.HandleFunc("DELETE /issues/{id}/labels", s.removeLabel)
 	// Search (slice 7).
 	mux.HandleFunc("GET /search", s.search)
+	// Activity feed (slice 9).
+	mux.HandleFunc("GET /activity", s.activity)
 	return mux
 }
 

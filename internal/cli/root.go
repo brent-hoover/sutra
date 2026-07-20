@@ -50,6 +50,7 @@ func NewRoot(cfg config.Config) *cobra.Command {
 		linkCmd(cfg),
 		labelCmd(cfg),
 		searchCmd(cfg),
+		activityCmd(cfg),
 	)
 	return root
 }

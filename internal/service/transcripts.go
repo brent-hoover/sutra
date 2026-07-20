@@ -160,10 +160,15 @@ func (s *Service) DiscoverTranscripts(dir string) ([]domain.DiscoveredTranscript
 			return nil
 		}
 		sid := sessionIDFromPath(p)
+		var mod time.Time
+		if info, err := d.Info(); err == nil {
+			mod = info.ModTime().UTC()
+		}
 		out = append(out, domain.DiscoveredTranscript{
 			SessionID: sid,
 			Path:      filepath.Join(s.projectsDir, filepath.FromSlash(p)),
 			Ingested:  ingested[sid],
+			ModTime:   mod,
 		})
 		return nil
 	})
