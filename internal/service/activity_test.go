@@ -186,6 +186,42 @@ func TestReingestDetectsContentChangeIgnoringMtime(t *testing.T) {
 	}
 }
 
+// captured_at is the session start (historical). Touching a timestamp-less file
+// — whose captured_at is derived from the file mtime — and re-ingesting the
+// unchanged content must not move the recorded start; only source_mtime updates.
+func TestReingestPreservesCapturedAtForTimestamplessSession(t *testing.T) {
+	projects := t.TempDir()
+	svc := newService(t, projects)
+	dir := filepath.Join(projects, "-proj")
+	path := writeSession(t, dir, "sess-ts", noTimestampLines())
+
+	m1 := time.Now().Add(-3 * time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(path, m1, m1); err != nil {
+		t.Fatalf("chtimes m1: %v", err)
+	}
+	first, err := svc.IngestTranscript(path)
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	// Touch the file (new mtime), content unchanged, and re-ingest.
+	m2 := time.Now().Add(-1 * time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(path, m2, m2); err != nil {
+		t.Fatalf("chtimes m2: %v", err)
+	}
+	second, err := svc.IngestTranscript(path)
+	if err != nil {
+		t.Fatalf("re-ingest: %v", err)
+	}
+
+	if !second.CapturedAt.Equal(first.CapturedAt) {
+		t.Errorf("captured_at drifted on touch: %v -> %v", first.CapturedAt, second.CapturedAt)
+	}
+	if !second.SourceMtime.Equal(m2.UTC()) {
+		t.Errorf("source_mtime not refreshed: got %v, want %v", second.SourceMtime, m2.UTC())
+	}
+}
+
 func TestActivityWindowExcludesOlder(t *testing.T) {
 	projects := t.TempDir()
 	svc := newService(t, projects)

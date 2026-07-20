@@ -113,13 +113,15 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		}
 		changed := prevSig != contentSignature(t.Messages)
 
-		// Always refresh lightweight metadata, including source_mtime (which
-		// drives the activity feed's window). This backfills source_mtime for rows
-		// migrated in before the column existed, so a recently-modified session is
-		// placed in the window even when its content is unchanged.
+		// Refresh lightweight metadata, including source_mtime (which drives the
+		// activity feed's window), and backfill source_mtime for rows migrated in
+		// before the column existed. captured_at is the session start — a historical
+		// value — so it is set once at insert and never overwritten here; otherwise
+		// touching a timestamp-less file (captured_at derived from mtime) would
+		// silently move the recorded start time.
 		if _, err := tx.Exec(
-			`UPDATE transcripts SET source_path = ?, title = ?, captured_at = ?, source_mtime = ? WHERE id = ?`,
-			t.SourcePath, t.Title, t.CapturedAt.Format(timeFmt), mtimeStr(t.SourceMtime), t.ID,
+			`UPDATE transcripts SET source_path = ?, title = ?, source_mtime = ? WHERE id = ?`,
+			t.SourcePath, t.Title, mtimeStr(t.SourceMtime), t.ID,
 		); err != nil {
 			return domain.Transcript{}, fmt.Errorf("update transcript: %w", err)
 		}
