@@ -111,3 +111,32 @@ func TestCSRFGuardWithoutToken(t *testing.T) {
 		t.Errorf("GET = %d, want 200 (safe method, no CSRF guard)", got)
 	}
 }
+
+// DNS-rebinding defense: a tokenless daemon must reject requests whose Host is
+// not a loopback literal, even for safe methods and even with X-Sutra-Client set
+// (an attacker page rebound to 127.0.0.1 can set custom headers same-origin).
+func TestRejectsNonLoopbackHostWithoutToken(t *testing.T) {
+	srv := authServer(t, "")
+
+	do := func(method string) int {
+		req, err := http.NewRequest(method, srv.URL+"/issues", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Host = "attacker.example.com" // spoofed / rebound Host
+		req.Header.Set("X-Sutra-Client", "cli")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if got := do(http.MethodGet); got != http.StatusForbidden {
+		t.Errorf("GET with non-loopback Host = %d, want 403", got)
+	}
+	if got := do(http.MethodPost); got != http.StatusForbidden {
+		t.Errorf("POST with non-loopback Host = %d, want 403", got)
+	}
+}

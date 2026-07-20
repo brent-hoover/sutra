@@ -87,13 +87,24 @@ func HandlerWithAuth(svc *service.Service, token string) http.Handler {
 	return authMiddleware(token, Handler(svc))
 }
 
-// csrfGuard rejects state-changing requests that lack the X-Sutra-Client header.
-// A cross-origin browser cannot set a custom header on a "simple" request; doing
-// so forces a CORS preflight, which the daemon never approves. This protects the
-// unauthenticated (tokenless) daemon from CSRF. When a token is set, the
-// Authorization header already provides this guarantee, so this is not applied.
+// csrfGuard protects the unauthenticated (tokenless, loopback-only) daemon.
+//
+// It rejects any request whose Host is not a loopback literal: the tokenless
+// daemon only binds loopback, so a non-loopback Host means a DNS-rebinding
+// attack (an attacker page rebound to 127.0.0.1 still carries its own Host).
+//
+// It also requires the X-Sutra-Client header on state-changing methods: a
+// cross-origin browser cannot set a custom header on a "simple" request without
+// a CORS preflight the daemon never approves, blocking classic CSRF.
+//
+// When a token is set, the Authorization header provides both guarantees, so
+// this guard is not applied.
 func csrfGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopbackAddr(r.Host) {
+			writeError(w, http.StatusForbidden, "unexpected Host header")
+			return
+		}
 		switch r.Method {
 		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 			if r.Header.Get("X-Sutra-Client") == "" {
