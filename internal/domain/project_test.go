@@ -29,8 +29,8 @@ func TestValidateSlug(t *testing.T) {
 		t.Errorf("canonical slug rejected: %v", err)
 	}
 	for _, bad := range []string{"", "   ", "Not Canonical!", "Has Space"} {
-		if err := ValidateSlug(bad); !errors.Is(err, ErrInvalidProject) {
-			t.Errorf("ValidateSlug(%q) = %v, want ErrInvalidProject", bad, err)
+		if err := ValidateSlug(bad); !errors.Is(err, ErrInvalidSlug) {
+			t.Errorf("ValidateSlug(%q) = %v, want ErrInvalidSlug", bad, err)
 		}
 	}
 }

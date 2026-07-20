@@ -92,7 +92,7 @@ func (s *Store) UpdateSkillTx(id string, mutate func(*domain.Skill) error) (doma
 	}
 	if sk.Slug != origSlug {
 		if err := domain.ValidateSlug(sk.Slug); err != nil {
-			return domain.Skill{}, err
+			return domain.Skill{}, errors.Join(domain.ErrInvalidSkill, err)
 		}
 	}
 	_, err = tx.Exec(

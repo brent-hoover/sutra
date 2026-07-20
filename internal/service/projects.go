@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"time"
@@ -29,7 +30,7 @@ func (s *Service) CreateProject(name, repoPath, slug, description string) (domai
 		return domain.Project{}, err
 	}
 	if err := domain.ValidateSlug(p.Slug); err != nil {
-		return domain.Project{}, err
+		return domain.Project{}, errors.Join(domain.ErrInvalidProject, err)
 	}
 	if err := s.store.CreateProject(p); err != nil {
 		return domain.Project{}, err

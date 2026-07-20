@@ -44,15 +44,20 @@ func (p Project) Validate() error {
 	return nil
 }
 
+// ErrInvalidSlug is returned by ValidateSlug for a blank or non-canonical slug.
+// It is entity-neutral so callers can wrap it with their own error (e.g.
+// ErrInvalidProject, ErrInvalidSkill) for correct HTTP status mapping.
+var ErrInvalidSlug = errors.New("invalid slug")
+
 // ValidateSlug reports whether a slug is canonical (URL-safe). It is enforced on
 // create and on slug changes; an unchanged legacy slug is grandfathered so
 // unrelated updates aren't blocked.
 func ValidateSlug(slug string) error {
 	if slug == "" {
-		return errors.Join(ErrInvalidProject, errors.New("slug is required"))
+		return errors.Join(ErrInvalidSlug, errors.New("slug is required"))
 	}
 	if slug != Slugify(slug) {
-		return errors.Join(ErrInvalidProject, fmt.Errorf("slug %q is not url-safe (want %q)", slug, Slugify(slug)))
+		return errors.Join(ErrInvalidSlug, fmt.Errorf("slug %q is not url-safe (want %q)", slug, Slugify(slug)))
 	}
 	return nil
 }

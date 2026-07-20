@@ -177,7 +177,7 @@ func (s *Store) UpdateProjectTx(id string, mutate func(*domain.Project) error) (
 	// slug so unrelated fields can still be updated.
 	if p.Slug != origSlug {
 		if err := domain.ValidateSlug(p.Slug); err != nil {
-			return domain.Project{}, err
+			return domain.Project{}, errors.Join(domain.ErrInvalidProject, err)
 		}
 	}
 	// Only re-check encoded collisions when the repo path actually changed, so a

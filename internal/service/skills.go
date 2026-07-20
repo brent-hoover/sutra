@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"time"
 
 	"github.com/brent-hoover/sutra/internal/domain"
@@ -26,7 +27,7 @@ func (s *Service) CreateSkill(name, slug, description, content string) (domain.S
 		return domain.Skill{}, err
 	}
 	if err := domain.ValidateSlug(sk.Slug); err != nil {
-		return domain.Skill{}, err
+		return domain.Skill{}, errors.Join(domain.ErrInvalidSkill, err)
 	}
 	if err := s.store.CreateSkill(sk); err != nil {
 		return domain.Skill{}, err
