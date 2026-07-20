@@ -22,7 +22,9 @@ func (c *Client) Activity(ctx context.Context, since time.Time) (ActivityResult,
 	// RFC3339Nano preserves sub-second precision so the window boundary is not
 	// rounded back by up to a second.
 	q.Set("since", since.UTC().Format(time.RFC3339Nano))
-	req, err := c.newRequest(ctx, http.MethodGet, "/activity?"+q.Encode(), nil)
+	// POST: building the feed auto-ingests recent sessions (a persistent write),
+	// so the endpoint is state-changing.
+	req, err := c.newRequest(ctx, http.MethodPost, "/activity?"+q.Encode(), nil)
 	if err != nil {
 		return ActivityResult{}, err
 	}

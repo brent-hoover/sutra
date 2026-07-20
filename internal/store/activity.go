@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"sort"
 	"time"
@@ -16,15 +17,24 @@ import (
 // therefore parse and filter/sort in Go. For a single-user store this is cheap;
 // if history ever grows large, add an indexed epoch column.
 func (s *Store) ActivitySince(since time.Time) ([]domain.ActivityEvent, error) {
-	events, err := s.ledgerEvents()
+	// Read both event sets in one transaction so the feed is a consistent
+	// snapshot — a concurrent mutation can't land a linked transcript without its
+	// ledger event (or vice versa). Read-only, so a deferred rollback is enough.
+	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
-	tx, err := s.transcriptEvents()
+	defer tx.Rollback()
+
+	events, err := ledgerEvents(tx)
 	if err != nil {
 		return nil, err
 	}
-	events = append(events, tx...)
+	transcripts, err := transcriptEvents(tx)
+	if err != nil {
+		return nil, err
+	}
+	events = append(events, transcripts...)
 
 	kept := events[:0]
 	for _, e := range events {
@@ -36,8 +46,8 @@ func (s *Store) ActivitySince(since time.Time) ([]domain.ActivityEvent, error) {
 	return kept, nil
 }
 
-func (s *Store) ledgerEvents() ([]domain.ActivityEvent, error) {
-	rows, err := s.db.Query(
+func ledgerEvents(tx *sql.Tx) ([]domain.ActivityEvent, error) {
+	rows, err := tx.Query(
 		`SELECT l.at, l.issue_id, l.kind, l.field, l.old_value, l.new_value, i.subject
 		 FROM ledger l JOIN issues i ON i.id = l.issue_id`)
 	if err != nil {
@@ -63,8 +73,8 @@ func (s *Store) ledgerEvents() ([]domain.ActivityEvent, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) transcriptEvents() ([]domain.ActivityEvent, error) {
-	rows, err := s.db.Query(
+func transcriptEvents(tx *sql.Tx) ([]domain.ActivityEvent, error) {
+	rows, err := tx.Query(
 		`SELECT t.captured_at, t.source_mtime, t.id, t.title, t.issue_id, i.subject
 		 FROM transcripts t LEFT JOIN issues i ON i.id = t.issue_id`)
 	if err != nil {

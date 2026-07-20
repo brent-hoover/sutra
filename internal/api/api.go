@@ -69,8 +69,10 @@ func Handler(svc *service.Service) http.Handler {
 	mux.HandleFunc("DELETE /issues/{id}/labels", s.removeLabel)
 	// Search (slice 7).
 	mux.HandleFunc("GET /search", s.search)
-	// Activity feed (slice 9).
-	mux.HandleFunc("GET /activity", s.activity)
+	// Activity feed (slice 9). POST, not GET: building the feed auto-ingests
+	// recent sessions (a persistent write), so the endpoint is state-changing and
+	// must not be reachable by safe-method prefetchers/crawlers.
+	mux.HandleFunc("POST /activity", s.activity)
 	return mux
 }
 
