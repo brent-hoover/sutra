@@ -242,8 +242,13 @@ func writeSkill(target, slug, content string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		return "", err
+	}
+	// Close explicitly (not deferred) and surface its error: a delayed write
+	// failure can be reported at close, so install must not claim success then.
+	if err := f.Close(); err != nil {
 		return "", err
 	}
 	return filepath.Join(target, rel), nil
