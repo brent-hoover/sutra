@@ -283,7 +283,7 @@ As a developer, I want clients to authenticate so that only my machines reach th
 As a developer, I want to point a client at the daemon over the LAN so that I can work from any of my computers.
 
 **Acceptance criteria:**
-- Given `SUTRA_HOST` set to the daemon's LAN address and a valid token, When I run the CLI or TUI from another machine, Then it operates against the daemon's data
+- Given the `host` setting pointed at the daemon's LAN address and a valid token, When I run the CLI or TUI from another machine, Then it operates against the daemon's data
 
 **Priority:** must
 

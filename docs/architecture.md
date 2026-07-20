@@ -26,7 +26,7 @@ not governed by these rules.
 | Module | Purpose | May import |
 |--------|---------|------------|
 | `domain` | Core entities (Issue, IssueType, Document, Transcript, and their links) and rules. Pure. | nothing |
-| `config` | Load and validate configuration: DB path, listen address, `SUTRA_HOST`, bearer token. | nothing |
+| `config` | Load and validate configuration from `~/.config/sutra/config.toml`: DB path, listen address, host, bearer token. | nothing |
 | `store` | SQLite + FTS5 persistence implementing the domain repositories. | `domain`, `config` |
 | `service` | Use-cases: create an issue, attach a DDD document, ingest and link a transcript, search. Opens the store. | `domain`, `store`, `config` |
 | `api` | HTTP daemon — routes and handlers over `service`; `api.Run` wires the service and serves (`sutra serve`). | `domain`, `service`, `config` |

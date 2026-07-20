@@ -87,7 +87,7 @@ date: 2026-07-16
 - **Decision:** the same single `sutra` binary installs on every machine. On
   the Ubuntu home-server box a `systemd` service runs `sutra serve`, bound to
   the LAN address. On each macOS client the same binary runs the TUI/CLI
-  subcommands, pointing at the daemon via config / `SUTRA_HOST`. (The Ubuntu
+  subcommands, pointing at the daemon via the `host` config setting. (The Ubuntu
   host and macOS clients are specified by the owner; vision.md states only
   "one home-network machine" and "all their computers".)
   Transport is plain HTTP over the home LAN with a shared bearer token in

@@ -81,9 +81,9 @@ To let multiple agents work concurrently after S2 without colliding:
 - **Stories:** JSON API covers every operation · CLI is a thin client ·
   Authenticated LAN access · Use clients from another machine
 - **Why now:** locks the real client/server contract (config, bearer token,
-  `SUTRA_HOST`) directly after the skeleton, before features accrete.
+  the `host` setting) directly after the skeleton, before features accrete.
 - **Verify:** a request with a wrong/missing token returns 401; with the
-  correct token, 200; the CLI pointed at `SUTRA_HOST` from another machine
+  correct token, 200; the CLI pointed at a configured `host` from another machine
   operates on the daemon's data.
 
 ## Slice 3: Issue CRUD complete
