@@ -28,7 +28,11 @@ type Transcript struct {
 	IssueID    *string   `json:"issue_id,omitempty"`
 	CapturedAt time.Time `json:"captured_at"`
 	CreatedAt  time.Time `json:"created_at"`
-	Messages   []Message `json:"messages,omitempty"`
+	// SourceMtime is the mtime of the .jsonl file at ingest — the session's
+	// last-modified time. Used to detect unchanged sessions (skip re-ingest) and
+	// to place the session in the activity feed's window.
+	SourceMtime time.Time `json:"source_mtime"`
+	Messages    []Message `json:"messages,omitempty"`
 }
 
 // Validate enforces that session_id and source_path are non-empty.

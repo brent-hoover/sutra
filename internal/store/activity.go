@@ -65,7 +65,7 @@ func (s *Store) ledgerEvents() ([]domain.ActivityEvent, error) {
 
 func (s *Store) transcriptEvents() ([]domain.ActivityEvent, error) {
 	rows, err := s.db.Query(
-		`SELECT t.captured_at, t.id, t.title, t.issue_id, i.subject
+		`SELECT t.captured_at, t.source_mtime, t.id, t.title, t.issue_id, i.subject
 		 FROM transcripts t LEFT JOIN issues i ON i.id = t.issue_id`)
 	if err != nil {
 		return nil, fmt.Errorf("query transcript activity: %w", err)
@@ -75,12 +75,12 @@ func (s *Store) transcriptEvents() ([]domain.ActivityEvent, error) {
 	var out []domain.ActivityEvent
 	for rows.Next() {
 		var (
-			at      string
-			issueID *string
-			subject *string
-			e       = domain.ActivityEvent{Type: domain.ActivityTranscript}
+			capturedAt, sourceMtime string
+			issueID                 *string
+			subject                 *string
+			e                       = domain.ActivityEvent{Type: domain.ActivityTranscript}
 		)
-		if err := rows.Scan(&at, &e.TranscriptID, &e.Title, &issueID, &subject); err != nil {
+		if err := rows.Scan(&capturedAt, &sourceMtime, &e.TranscriptID, &e.Title, &issueID, &subject); err != nil {
 			return nil, fmt.Errorf("scan transcript activity: %w", err)
 		}
 		if issueID != nil {
@@ -89,8 +89,15 @@ func (s *Store) transcriptEvents() ([]domain.ActivityEvent, error) {
 		if subject != nil {
 			e.IssueSubject = *subject
 		}
-		if e.At, err = time.Parse(timeFmt, at); err != nil {
-			return nil, fmt.Errorf("parse transcript captured_at: %w", err)
+		// Place the session at its last-modified time (source_mtime) so a session
+		// modified within the window appears even if it started earlier. Fall back
+		// to captured_at for rows predating source_mtime.
+		when := sourceMtime
+		if when == "" {
+			when = capturedAt
+		}
+		if e.At, err = time.Parse(timeFmt, when); err != nil {
+			return nil, fmt.Errorf("parse transcript time: %w", err)
 		}
 		out = append(out, e)
 	}

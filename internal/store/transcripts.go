@@ -12,13 +12,14 @@ import (
 func (s *Store) migrateTranscripts() error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS transcripts (
-    id          TEXT PRIMARY KEY,
-    session_id  TEXT NOT NULL UNIQUE,
-    source_path TEXT NOT NULL,
-    title       TEXT NOT NULL DEFAULT '',
-    issue_id    TEXT,
-    captured_at TEXT NOT NULL,
-    created_at  TEXT NOT NULL
+    id           TEXT PRIMARY KEY,
+    session_id   TEXT NOT NULL UNIQUE,
+    source_path  TEXT NOT NULL,
+    title        TEXT NOT NULL DEFAULT '',
+    issue_id     TEXT,
+    captured_at  TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    source_mtime TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS messages (
     id            TEXT PRIMARY KEY,
@@ -33,7 +34,39 @@ CREATE TABLE IF NOT EXISTS messages (
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate transcripts: %w", err)
 	}
+	// Additive migration for databases created before source_mtime existed.
+	if err := s.addColumnIfMissing("transcripts", "source_mtime", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate transcripts source_mtime: %w", err)
+	}
 	return nil
+}
+
+// addColumnIfMissing adds a column to a table when it is not already present,
+// so additive schema changes are idempotent across existing databases.
+func (s *Store) addColumnIfMissing(table, column, decl string) error {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid, notnull, pk int
+			name, ctype      string
+			dflt             sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return rows.Close()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
+	return err
 }
 
 // UpsertTranscript stores a transcript and its messages, keyed by session_id.
@@ -63,17 +96,17 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 			return domain.Transcript{}, fmt.Errorf("parse created_at: %w", err)
 		}
 		if _, err := tx.Exec(
-			`UPDATE transcripts SET source_path = ?, title = ?, captured_at = ? WHERE id = ?`,
-			t.SourcePath, t.Title, t.CapturedAt.Format(timeFmt), t.ID,
+			`UPDATE transcripts SET source_path = ?, title = ?, captured_at = ?, source_mtime = ? WHERE id = ?`,
+			t.SourcePath, t.Title, t.CapturedAt.Format(timeFmt), mtimeStr(t.SourceMtime), t.ID,
 		); err != nil {
 			return domain.Transcript{}, fmt.Errorf("update transcript: %w", err)
 		}
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := tx.Exec(
-			`INSERT INTO transcripts (id, session_id, source_path, title, issue_id, captured_at, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO transcripts (id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			t.ID, t.SessionID, t.SourcePath, t.Title, nullString(t.IssueID),
-			t.CapturedAt.Format(timeFmt), t.CreatedAt.Format(timeFmt),
+			t.CapturedAt.Format(timeFmt), t.CreatedAt.Format(timeFmt), mtimeStr(t.SourceMtime),
 		); err != nil {
 			return domain.Transcript{}, fmt.Errorf("insert transcript: %w", err)
 		}
@@ -136,7 +169,7 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 // seq order, or ErrNotFound.
 func (s *Store) GetTranscript(id string) (domain.Transcript, error) {
 	t, err := scanTranscript(s.db.QueryRow(
-		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at
+		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime
 		 FROM transcripts WHERE id = ?`, id))
 	if err != nil {
 		return domain.Transcript{}, err
@@ -215,7 +248,7 @@ func (s *Store) LinkTranscript(transcriptID, issueID string, entry domain.Ledger
 // messages), ordered by capture time.
 func (s *Store) TranscriptsForIssue(issueID string) ([]domain.Transcript, error) {
 	rows, err := s.db.Query(
-		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at
+		`SELECT id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime
 		 FROM transcripts WHERE issue_id = ? ORDER BY captured_at`, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("query transcripts: %w", err)
@@ -252,13 +285,41 @@ func (s *Store) IngestedSessionIDs() (map[string]bool, error) {
 	return set, rows.Err()
 }
 
+// IngestedSourceMtimes maps each ingested session_id to the source file mtime
+// recorded at its last ingest. Sessions whose mtime was never recorded (empty)
+// are omitted, so callers treat them as "unknown" and re-ingest.
+func (s *Store) IngestedSourceMtimes() (map[string]time.Time, error) {
+	rows, err := s.db.Query(`SELECT session_id, source_mtime FROM transcripts`)
+	if err != nil {
+		return nil, fmt.Errorf("query source mtimes: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var id, mtime string
+		if err := rows.Scan(&id, &mtime); err != nil {
+			return nil, fmt.Errorf("scan source mtime: %w", err)
+		}
+		t, err := parseMtime(mtime)
+		if err != nil {
+			return nil, fmt.Errorf("parse source mtime: %w", err)
+		}
+		if !t.IsZero() {
+			out[id] = t
+		}
+	}
+	return out, rows.Err()
+}
+
 func scanTranscript(row rowScanner) (domain.Transcript, error) {
 	var (
 		t                     domain.Transcript
 		issueID               sql.NullString
 		capturedAt, createdAt string
+		sourceMtime           string
 	)
-	err := row.Scan(&t.ID, &t.SessionID, &t.SourcePath, &t.Title, &issueID, &capturedAt, &createdAt)
+	err := row.Scan(&t.ID, &t.SessionID, &t.SourcePath, &t.Title, &issueID, &capturedAt, &createdAt, &sourceMtime)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Transcript{}, domain.ErrNotFound
 	}
@@ -274,7 +335,27 @@ func scanTranscript(row rowScanner) (domain.Transcript, error) {
 	if t.CreatedAt, err = time.Parse(timeFmt, createdAt); err != nil {
 		return domain.Transcript{}, fmt.Errorf("parse created_at: %w", err)
 	}
+	if t.SourceMtime, err = parseMtime(sourceMtime); err != nil {
+		return domain.Transcript{}, fmt.Errorf("parse source_mtime: %w", err)
+	}
 	return t, nil
+}
+
+// mtimeStr formats a source mtime for storage; a zero time (unknown) is stored
+// as the empty string.
+func mtimeStr(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(timeFmt)
+}
+
+// parseMtime is the inverse of mtimeStr: an empty string is the zero time.
+func parseMtime(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(timeFmt, s)
 }
 
 func (s *Store) messagesFor(transcriptID string) ([]domain.Message, error) {

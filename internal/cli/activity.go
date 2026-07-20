@@ -63,6 +63,7 @@ func parseSince(s string) (time.Time, error) {
 }
 
 // parseWindowDuration extends time.ParseDuration with a trailing 'd' for days.
+// A negative window is rejected regardless of syntax — the window looks back.
 func parseWindowDuration(s string) (time.Duration, error) {
 	if n, ok := strings.CutSuffix(s, "d"); ok {
 		days, err := strconv.Atoi(n)
@@ -74,7 +75,14 @@ func parseWindowDuration(s string) (time.Duration, error) {
 		}
 		return time.Duration(days) * 24 * time.Hour, nil
 	}
-	return time.ParseDuration(s)
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, err
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("negative duration: %s", s)
+	}
+	return d, nil
 }
 
 // renderActivity prints the feed newest-first, grouped by day. All stored text

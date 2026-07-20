@@ -54,10 +54,11 @@ func (s *Service) IngestTranscript(path string) (domain.Transcript, error) {
 
 	now := time.Now().UTC()
 	t := domain.Transcript{
-		ID:         domain.NewID(),
-		SessionID:  sessionIDFromPath(rel),
-		SourcePath: filepath.Join(s.projectsDir, rel),
-		CreatedAt:  now,
+		ID:          domain.NewID(),
+		SessionID:   sessionIDFromPath(rel),
+		SourcePath:  filepath.Join(s.projectsDir, rel),
+		CreatedAt:   now,
+		SourceMtime: info.ModTime().UTC(),
 	}
 
 	// Read line-by-line with a bufio.Reader (no per-line size cap, unlike

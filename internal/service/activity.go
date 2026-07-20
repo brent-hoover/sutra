@@ -25,18 +25,26 @@ func (s *Service) Activity(since time.Time) (domain.ActivityFeed, error) {
 	return domain.ActivityFeed{Since: since, Events: events}, nil
 }
 
-// ingestRecentSessions ingests every discovered Claude session whose file was
-// modified at or after `since`. Ingest is idempotent (UpsertTranscript), so a
-// continued session is re-captured with its new messages and an unchanged one
-// is a no-op write.
+// ingestRecentSessions ingests each discovered Claude session whose file was
+// modified within the window and has actually changed since its last ingest.
+// Skipping unchanged sessions is essential: re-ingesting a linked transcript
+// writes a ledger entry, so merely viewing activity must not manufacture new
+// activity.
 func (s *Service) ingestRecentSessions(since time.Time) error {
 	discovered, err := s.DiscoverTranscripts("")
 	if err != nil {
 		return err
 	}
+	ingested, err := s.store.IngestedSourceMtimes()
+	if err != nil {
+		return err
+	}
 	for _, d := range discovered {
 		if d.ModTime.Before(since) {
-			continue
+			continue // outside the window
+		}
+		if prev, ok := ingested[d.SessionID]; ok && !d.ModTime.After(prev) {
+			continue // already captured and unchanged since
 		}
 		if _, err := s.IngestTranscript(d.Path); err != nil {
 			return fmt.Errorf("auto-ingest %s: %w", d.Path, err)
