@@ -111,7 +111,7 @@ sutra doc remove <doc-id>
 ### Transcripts
 
 Capture Claude `.jsonl` session files (one entry per session, broken into
-messages). Ingest is confined to `SUTRA_PROJECTS_DIR`.
+messages). Ingest is confined to the configured `projects_dir`.
 
 ```bash
 sutra transcript discover                       # local sessions + ingested state

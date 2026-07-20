@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -66,7 +67,30 @@ func Load() (Config, error) {
 	if fc.ProjectsDir != "" {
 		cfg.ProjectsDir = fc.ProjectsDir
 	}
+
+	// TOML has no shell expansion, so a home-relative path like "~/.sutra/sutra.db"
+	// would otherwise be created under the current directory. Expand it for the
+	// filesystem-path fields.
+	cfg.DBPath = expandHome(cfg.DBPath)
+	cfg.ProjectsDir = expandHome(cfg.ProjectsDir)
 	return cfg, nil
+}
+
+// expandHome replaces a leading "~/" (or a bare "~") with the user's home
+// directory. It returns the path unchanged if there is no "~" prefix or the
+// home directory cannot be determined.
+func expandHome(p string) string {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	if p == "~" {
+		return home
+	}
+	return filepath.Join(home, p[2:])
 }
 
 // defaults returns the configuration used when no file (or no key) overrides it.

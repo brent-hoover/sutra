@@ -86,6 +86,28 @@ func TestLoadPartialFileKeepsDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadExpandsHomePaths(t *testing.T) {
+	writeConfig(t, `
+db_path      = "~/.sutra/sutra.db"
+projects_dir = "~/work/projects"
+`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	if want := filepath.Join(home, ".sutra", "sutra.db"); cfg.DBPath != want {
+		t.Errorf("DBPath = %q, want %q", cfg.DBPath, want)
+	}
+	if want := filepath.Join(home, "work", "projects"); cfg.ProjectsDir != want {
+		t.Errorf("ProjectsDir = %q, want %q", cfg.ProjectsDir, want)
+	}
+}
+
 func TestLoadMalformedFileErrors(t *testing.T) {
 	writeConfig(t, "listen_addr = = broken")
 
