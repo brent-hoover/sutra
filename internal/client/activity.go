@@ -19,7 +19,9 @@ type ActivityResult struct {
 // Activity fetches the activity feed at or after `since` from the daemon.
 func (c *Client) Activity(ctx context.Context, since time.Time) (ActivityResult, error) {
 	q := url.Values{}
-	q.Set("since", since.UTC().Format(time.RFC3339))
+	// RFC3339Nano preserves sub-second precision so the window boundary is not
+	// rounded back by up to a second.
+	q.Set("since", since.UTC().Format(time.RFC3339Nano))
 	req, err := c.newRequest(ctx, http.MethodGet, "/activity?"+q.Encode(), nil)
 	if err != nil {
 		return ActivityResult{}, err

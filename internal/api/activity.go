@@ -13,7 +13,8 @@ func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "since is required")
 		return
 	}
-	since, err := time.Parse(time.RFC3339, sinceStr)
+	// RFC3339Nano parses timestamps both with and without sub-second precision.
+	since, err := time.Parse(time.RFC3339Nano, sinceStr)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid since (want RFC3339): "+sinceStr)
 		return
