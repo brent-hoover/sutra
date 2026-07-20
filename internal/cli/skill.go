@@ -235,8 +235,23 @@ func writeSkill(target, slug, content string) (string, error) {
 	}
 	defer root.Close()
 
-	if err := root.Mkdir(slug, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
-		return "", err
+	if err := root.Mkdir(slug, 0o755); err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
+		// The slug already exists. It must be a real directory: a symlink here
+		// would be followed within the root and redirect the install onto another
+		// skill or file, so reject it (no-follow Lstat, not a traversing Stat).
+		fi, lerr := root.Lstat(slug)
+		if lerr != nil {
+			return "", lerr
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("refusing to install: %q is a symlink, not a directory", slug)
+		}
+		if !fi.IsDir() {
+			return "", fmt.Errorf("refusing to install: %q exists and is not a directory", slug)
+		}
 	}
 	rel := filepath.Join(slug, "SKILL.md")
 	// A uniquely-named temp created with O_EXCL: exclusive creation fails on a

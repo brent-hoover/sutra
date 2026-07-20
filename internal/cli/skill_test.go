@@ -44,6 +44,33 @@ func TestWriteSkillRejectsEscapingDirSymlink(t *testing.T) {
 	}
 }
 
+// A slug that is a symlink to ANOTHER directory within the skills root must be
+// refused, so install cannot redirect onto (and overwrite) a different skill.
+func TestWriteSkillRejectsInRootSymlinkedSlug(t *testing.T) {
+	target := t.TempDir()
+	// A real "other" skill dir with an existing SKILL.md.
+	other := filepath.Join(target, "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	otherSkill := filepath.Join(other, "SKILL.md")
+	if err := os.WriteFile(otherSkill, []byte("other content"), 0o644); err != nil {
+		t.Fatalf("write other: %v", err)
+	}
+	// graphify -> other (both inside the root).
+	if err := os.Symlink("other", filepath.Join(target, "graphify")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	if _, err := writeSkill(target, "graphify", "hijack"); err == nil {
+		t.Fatal("writeSkill through an in-root symlinked slug: got nil, want refusal")
+	}
+	// The other skill must be untouched.
+	if got, _ := os.ReadFile(otherSkill); string(got) != "other content" {
+		t.Errorf("other skill was overwritten via symlinked slug: %q", got)
+	}
+}
+
 // A pre-existing SKILL.md symlink that escapes the target must not be written
 // through: the atomic rename replaces the symlink with a real file inside the
 // target, and nothing lands at the symlink's escaping destination.
