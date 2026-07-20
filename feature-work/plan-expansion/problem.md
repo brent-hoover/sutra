@@ -17,15 +17,16 @@ lived in a throwaway `plan.md` document; the intent now is for it to live
 **directly as tracked tickets in Sutra**, so the tickets are the single source of
 truth and can be worked through by an agent.
 
-The baseline for this feature is `develop` (slices 1–9), verified against the
+The baseline for this feature is `develop` (slices 1–11), verified against the
 code in this worktree's `internal/domain`: issues carry `parent_id` (hierarchy),
-blocking edges (`blocked_by`/`is_blocking`), and an append-only ledger entry on
-every mutation. Issue types are `feature | bug | task | chore`; status is
-`open | in_progress | closed`; `LedgerEntry.kind` is a closed enum
-(`created|updated|commented|status_changed|linked|deleted`). There is no notion
-of a plan, no approval checkpoint, and no way to enumerate an issue's children.
-(Project/thread support seen elsewhere is on another branch, not in this
-baseline, so this feature does not assume `project_id`.)
+blocking edges (`blocked_by`/`is_blocking`), a nullable `project_id` (slice 10),
+and an append-only ledger entry on every mutation. Issue types are `feature | bug
+| task | chore`; status is `open | in_progress | closed`; `LedgerEntry.kind` is a
+closed enum (`created|updated|commented|status_changed|linked|deleted`). There is
+no notion of a plan, no approval checkpoint, and no way to enumerate an issue's
+children. This feature is split across two slices: **@slice13** (the `plan` issue
+type, its `approval` field, and atomic tree build + approve) and **@slice14** (the
+`parent_id` list filter that makes the tree traversable).
 
 A plan issue stands as the **root of its tracer tree** — the item an agent is
 pointed at. It may optionally reference the feature issue it plans (as its
@@ -125,6 +126,9 @@ no way to derive structured steps from that prose.
   current status — and mark items complete as it finishes them.
 - Approval is reachable by the human without leaving the TUI; the full
   build-and-approve flow is reachable by the agent without leaving the CLI.
+- The generated plan issue and its tracer children are **project-scoped
+  consistently**: when the plan references a feature issue (or a project is
+  supplied), the whole tree carries that `project_id`; otherwise it is unset.
 
 ## Open questions
 
