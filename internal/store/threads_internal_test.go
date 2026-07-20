@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -51,6 +52,46 @@ func TestGetThreadView(t *testing.T) {
 	}
 	if got.ID != th.ID || len(items) != 1 || items[0].ItemID != iss.ID {
 		t.Errorf("unexpected view: %+v items=%+v", got, items)
+	}
+}
+
+// GetThreadView is a consistent snapshot: a delete committed through a second
+// store handle mid-read (after the thread row, before its members) does not make
+// the view return a phantom thread with an empty membership set.
+func TestGetThreadViewSnapshotConsistency(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "t.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	th := newThread(t, s, "t")
+	iss := newIssue(t, s, "m")
+	if err := s.AddThreadItem(th.ID, domain.ThreadItemIssue, iss.ID); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+
+	// A second handle deletes the thread mid-read.
+	s2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open 2: %v", err)
+	}
+	t.Cleanup(func() { s2.Close() })
+	afterThreadReadHook = func() {
+		afterThreadReadHook = nil // fire once, before the members read
+		if err := s2.DeleteThread(th.ID); err != nil {
+			t.Errorf("concurrent delete: %v", err)
+		}
+	}
+	t.Cleanup(func() { afterThreadReadHook = nil })
+
+	got, items, err := s.GetThreadView(th.ID)
+	if err != nil {
+		t.Fatalf("view during concurrent delete: %v", err)
+	}
+	if got.ID != th.ID || len(items) != 1 || items[0].ItemID != iss.ID {
+		t.Errorf("snapshot inconsistent: thread=%s items=%+v", got.ID, items)
 	}
 }
 

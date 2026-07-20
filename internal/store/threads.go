@@ -11,6 +11,11 @@ import (
 
 const threadColumns = `id, project_id, title, body, status, created_at, updated_at`
 
+// afterThreadReadHook, if non-nil, runs inside GetThreadView after the thread row
+// is read but before its members — a test seam for exercising snapshot
+// consistency against a concurrent delete.
+var afterThreadReadHook func()
+
 // itemTables maps each thread item kind to the table its item_id references,
 // used to validate that an attached item exists.
 var itemTables = map[domain.ThreadItemKind]string{
@@ -87,6 +92,9 @@ func (s *Store) GetThreadView(id string) (domain.Thread, []domain.ThreadItem, er
 	t, err := scanThread(tx.QueryRow(`SELECT `+threadColumns+` FROM threads WHERE id = ?`, id))
 	if err != nil {
 		return domain.Thread{}, nil, err
+	}
+	if afterThreadReadHook != nil {
+		afterThreadReadHook()
 	}
 	items, err := threadItems(tx, id)
 	if err != nil {
