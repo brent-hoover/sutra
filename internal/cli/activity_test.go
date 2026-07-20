@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"math"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -17,6 +19,8 @@ func TestParseWindowDuration(t *testing.T) {
 		{"-24h", 0, true}, // finding 3: negative duration rejected
 		{"-1d", 0, true},  // negative days rejected
 		{"bogus", 0, true},
+		// finding: exercise the day-overflow boundary
+		{maxWindowDays() + "d", 0, true},
 	}
 	for _, tc := range cases {
 		got, err := parseWindowDuration(tc.in)
@@ -50,5 +54,21 @@ func TestParseSinceDefaultsToWindow(t *testing.T) {
 	}
 	if got.Before(before.Add(-time.Minute)) || got.After(time.Now()) {
 		t.Errorf("parseSince(\"\") = %v, want ~now-%v", got, defaultActivityWindow)
+	}
+}
+
+// maxWindowDays returns the largest day count that overflows the days→duration
+// multiplication, as a string (one past the safe maximum).
+func maxWindowDays() string {
+	return strconv.Itoa(int(math.MaxInt64/int64(24*time.Hour)) + 1)
+}
+
+func TestParseWindowDurationOverflowBoundary(t *testing.T) {
+	maxDays := int(math.MaxInt64 / int64(24*time.Hour))
+	if _, err := parseWindowDuration(strconv.Itoa(maxDays) + "d"); err != nil {
+		t.Errorf("parseWindowDuration(max days) unexpected error: %v", err)
+	}
+	if _, err := parseWindowDuration(strconv.Itoa(maxDays+1) + "d"); err == nil {
+		t.Error("parseWindowDuration(max days + 1) = nil error, want overflow rejection")
 	}
 }

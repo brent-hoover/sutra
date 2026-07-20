@@ -1,7 +1,9 @@
 package store
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -97,19 +99,21 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		Scan(&existingID, &existingCreated, &existingIssueID, &existingMtime)
 	switch {
 	case err == nil:
+		_ = existingMtime // mtime is a feed hint, not the change-detection authority
 		t.ID = existingID
 		if t.CreatedAt, err = time.Parse(timeFmt, existingCreated); err != nil {
 			return domain.Transcript{}, fmt.Errorf("parse created_at: %w", err)
 		}
-		prevMtime, perr := parseMtime(existingMtime)
-		if perr != nil {
-			return domain.Transcript{}, fmt.Errorf("parse source_mtime: %w", perr)
+		// Content-authoritative change detection (inside the tx): compare the
+		// incoming messages against the stored rows. File mtime is not trusted as
+		// proof of equality — a touched-but-unchanged file is a no-op, and a
+		// changed file is detected even if its mtime was preserved. Being in the
+		// tx makes this safe against concurrent activity requests.
+		prevSig, err := storedContentSignature(tx, existingID)
+		if err != nil {
+			return domain.Transcript{}, err
 		}
-		// Authoritative unchanged check (inside the tx): if we already recorded an
-		// mtime and the incoming file is not newer, this is a no-op — do not touch
-		// messages or manufacture a ledger update. Being in the tx makes it safe
-		// against concurrent activity requests.
-		if !prevMtime.IsZero() && !t.SourceMtime.After(prevMtime) {
+		if prevSig == contentSignature(t.Messages) {
 			_ = tx.Rollback()
 			return s.GetTranscript(t.ID)
 		}
@@ -119,9 +123,9 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		); err != nil {
 			return domain.Transcript{}, fmt.Errorf("update transcript: %w", err)
 		}
-		// A genuine change of a session whose mtime we already knew. A migrated row
-		// (prevMtime zero) is merely being backfilled, not changed, so no ledger.
-		logReingest = existingIssueID.Valid && !prevMtime.IsZero()
+		// The content genuinely changed; if the session is linked, that changes
+		// data tied to its issue, so record it.
+		logReingest = existingIssueID.Valid
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := tx.Exec(
 			`INSERT INTO transcripts (id, session_id, source_path, title, issue_id, captured_at, created_at, source_mtime)
@@ -307,33 +311,6 @@ func (s *Store) IngestedSessionIDs() (map[string]bool, error) {
 	return set, rows.Err()
 }
 
-// IngestedSourceMtimes maps each ingested session_id to the source file mtime
-// recorded at its last ingest. Sessions whose mtime was never recorded (empty)
-// are omitted, so callers treat them as "unknown" and re-ingest.
-func (s *Store) IngestedSourceMtimes() (map[string]time.Time, error) {
-	rows, err := s.db.Query(`SELECT session_id, source_mtime FROM transcripts`)
-	if err != nil {
-		return nil, fmt.Errorf("query source mtimes: %w", err)
-	}
-	defer rows.Close()
-
-	out := map[string]time.Time{}
-	for rows.Next() {
-		var id, mtime string
-		if err := rows.Scan(&id, &mtime); err != nil {
-			return nil, fmt.Errorf("scan source mtime: %w", err)
-		}
-		t, err := parseMtime(mtime)
-		if err != nil {
-			return nil, fmt.Errorf("parse source mtime: %w", err)
-		}
-		if !t.IsZero() {
-			out[id] = t
-		}
-	}
-	return out, rows.Err()
-}
-
 func scanTranscript(row rowScanner) (domain.Transcript, error) {
 	var (
 		t                     domain.Transcript
@@ -361,6 +338,39 @@ func scanTranscript(row rowScanner) (domain.Transcript, error) {
 		return domain.Transcript{}, fmt.Errorf("parse source_mtime: %w", err)
 	}
 	return t, nil
+}
+
+// contentSignature is a stable fingerprint of a transcript's messages (seq +
+// raw line). Two ingests produce the same signature iff their content matches,
+// so re-ingest change detection does not have to trust file mtimes.
+func contentSignature(msgs []domain.Message) string {
+	h := sha256.New()
+	for _, m := range msgs {
+		fmt.Fprintf(h, "%d\n%s\n", m.Seq, m.Raw)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// storedContentSignature computes contentSignature over the messages already
+// persisted for a transcript, read through the given transaction.
+func storedContentSignature(tx *sql.Tx, transcriptID string) (string, error) {
+	rows, err := tx.Query(`SELECT seq, raw FROM messages WHERE transcript_id = ? ORDER BY seq`, transcriptID)
+	if err != nil {
+		return "", fmt.Errorf("read stored messages: %w", err)
+	}
+	defer rows.Close()
+	var msgs []domain.Message
+	for rows.Next() {
+		var m domain.Message
+		if err := rows.Scan(&m.Seq, &m.Raw); err != nil {
+			return "", fmt.Errorf("scan stored message: %w", err)
+		}
+		msgs = append(msgs, m)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return contentSignature(msgs), nil
 }
 
 // mtimeStr formats a source mtime for storage; a zero time (unknown) is stored

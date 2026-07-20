@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/brent-hoover/sutra/internal/config"
 	"github.com/brent-hoover/sutra/internal/domain"
@@ -265,11 +264,12 @@ func TestReingestLinkedBumpsIssueOnlyWhenChanged(t *testing.T) {
 		t.Errorf("unchanged re-ingest wrote %d ledger updates, want 0", n)
 	}
 
-	// Changed session (newer mtime): bump + one ledger update.
-	newer := time.Now().Add(2 * time.Second)
-	if err := os.Chtimes(path, newer, newer); err != nil {
-		t.Fatalf("chtimes: %v", err)
-	}
+	// Genuinely changed session (an extra message): bump + one ledger update.
+	// Detection is content-based, so a real change is required — a mere mtime
+	// touch would (correctly) be a no-op.
+	changed := append(sessionLines(),
+		`{"type":"user","message":{"role":"user","content":"one more thing"}}`)
+	writeSession(t, filepath.Join(projectsDir, "-Users-me-proj"), "reingestbump", changed)
 	if _, err := svc.IngestTranscript(path); err != nil {
 		t.Fatalf("re-ingest changed: %v", err)
 	}

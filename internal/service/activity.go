@@ -26,25 +26,18 @@ func (s *Service) Activity(since time.Time) (domain.ActivityFeed, error) {
 }
 
 // ingestRecentSessions ingests each discovered Claude session whose file was
-// modified within the window and has actually changed since its last ingest.
-// Skipping unchanged sessions is essential: re-ingesting a linked transcript
-// writes a ledger entry, so merely viewing activity must not manufacture new
-// activity.
+// modified within the window. Re-ingesting an unchanged session is a no-op:
+// UpsertTranscript compares content, so merely viewing activity never
+// manufactures new activity. mtime is used only to bound which files are
+// candidates (recency), never as proof of content (in)equality.
 func (s *Service) ingestRecentSessions(since time.Time) error {
 	discovered, err := s.DiscoverTranscripts("")
-	if err != nil {
-		return err
-	}
-	ingested, err := s.store.IngestedSourceMtimes()
 	if err != nil {
 		return err
 	}
 	for _, d := range discovered {
 		if d.ModTime.Before(since) {
 			continue // outside the window
-		}
-		if prev, ok := ingested[d.SessionID]; ok && !d.ModTime.After(prev) {
-			continue // already captured and unchanged since
 		}
 		if _, err := s.IngestTranscript(d.Path); err != nil {
 			return fmt.Errorf("auto-ingest %s: %w", d.Path, err)
