@@ -238,17 +238,27 @@ func writeSkill(target, slug, content string) (string, error) {
 		return "", err
 	}
 	rel := filepath.Join(slug, "SKILL.md")
-	f, err := root.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	tmpRel := filepath.Join(slug, ".SKILL.md.tmp")
+
+	// Write to a temp file, then atomically rename it over SKILL.md, so a failed
+	// write/close never leaves an existing installed skill truncated or partial.
+	f, err := root.OpenFile(tmpRel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return "", err
 	}
 	if _, err := f.WriteString(content); err != nil {
 		f.Close()
+		root.Remove(tmpRel)
 		return "", err
 	}
 	// Close explicitly (not deferred) and surface its error: a delayed write
 	// failure can be reported at close, so install must not claim success then.
 	if err := f.Close(); err != nil {
+		root.Remove(tmpRel)
+		return "", err
+	}
+	if err := root.Rename(tmpRel, rel); err != nil {
+		root.Remove(tmpRel)
 		return "", err
 	}
 	return filepath.Join(target, rel), nil
