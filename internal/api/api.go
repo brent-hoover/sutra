@@ -77,9 +77,32 @@ func Handler(svc *service.Service) http.Handler {
 }
 
 // HandlerWithAuth builds the routes and, when token is non-empty, wraps them so
-// every request must present "Authorization: Bearer <token>".
+// every request must present "Authorization: Bearer <token>". When no token is
+// configured (loopback default), it instead guards state-changing methods
+// against CSRF, since there is no auth header to make cross-origin forgery fail.
 func HandlerWithAuth(svc *service.Service, token string) http.Handler {
+	if token == "" {
+		return csrfGuard(Handler(svc))
+	}
 	return authMiddleware(token, Handler(svc))
+}
+
+// csrfGuard rejects state-changing requests that lack the X-Sutra-Client header.
+// A cross-origin browser cannot set a custom header on a "simple" request; doing
+// so forces a CORS preflight, which the daemon never approves. This protects the
+// unauthenticated (tokenless) daemon from CSRF. When a token is set, the
+// Authorization header already provides this guarantee, so this is not applied.
+func csrfGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			if r.Header.Get("X-Sutra-Client") == "" {
+				writeError(w, http.StatusForbidden, "missing X-Sutra-Client header")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // authMiddleware enforces bearer-token auth when token is non-empty. An empty

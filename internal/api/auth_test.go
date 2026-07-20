@@ -75,3 +75,39 @@ func TestNoTokenDisablesAuth(t *testing.T) {
 		t.Errorf("status = %d, want 200 (auth disabled)", got)
 	}
 }
+
+// Without a token, state-changing requests must carry X-Sutra-Client (CSRF
+// guard); safe methods are unaffected.
+func TestCSRFGuardWithoutToken(t *testing.T) {
+	srv := authServer(t, "")
+
+	do := func(method, path string, header map[string]string) int {
+		req, err := http.NewRequest(method, srv.URL+path, nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		for k, v := range header {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", method, path, err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// POST without the header → 403 (simulates a cross-origin simple request).
+	if got := do(http.MethodPost, "/issues", nil); got != http.StatusForbidden {
+		t.Errorf("POST without X-Sutra-Client = %d, want 403", got)
+	}
+	// POST with the header passes the guard (reaches the handler; 400 for the
+	// empty body, not 403).
+	if got := do(http.MethodPost, "/issues", map[string]string{"X-Sutra-Client": "cli"}); got == http.StatusForbidden {
+		t.Errorf("POST with X-Sutra-Client = 403, want it to pass the CSRF guard")
+	}
+	// Safe method is never blocked.
+	if got := do(http.MethodGet, "/issues", nil); got != http.StatusOK {
+		t.Errorf("GET = %d, want 200 (safe method, no CSRF guard)", got)
+	}
+}

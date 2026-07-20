@@ -170,6 +170,11 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	// A custom header the daemon requires on state-changing requests when running
+	// without a token (loopback default). A cross-origin browser cannot set it
+	// without a CORS preflight the daemon never approves, so this blocks CSRF
+	// against the unauthenticated daemon.
+	req.Header.Set("X-Sutra-Client", "cli")
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
