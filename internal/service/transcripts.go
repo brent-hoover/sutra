@@ -95,17 +95,8 @@ func (s *Service) IngestTranscript(path string) (domain.Transcript, error) {
 		t.CapturedAt = info.ModTime().UTC()
 	}
 
-	// Auto-associate to a project whose repo path matches this session's working
-	// directory (the top-level folder under the projects dir is the encoded cwd).
-	encodedCWD := strings.SplitN(filepath.ToSlash(rel), "/", 2)[0]
-	pid, err := s.projectForEncodedCWD(encodedCWD)
-	if err != nil {
-		return domain.Transcript{}, err
-	}
-	if pid != "" {
-		t.ProjectID = &pid
-	}
-
+	// Project auto-association is resolved inside UpsertTranscript's transaction
+	// (from the session's encoded cwd) so the match and write are atomic.
 	if err := t.Validate(); err != nil {
 		return domain.Transcript{}, err
 	}

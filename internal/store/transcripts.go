@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/brent-hoover/sutra/internal/domain"
@@ -83,13 +84,18 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 	}
 	defer tx.Rollback()
 
-	// If the auto-associated project was deleted between the match and now, drop
-	// the association rather than fail ingest or store a dangling reference.
-	if t.ProjectID != nil {
-		if err := existsInTx(tx, "projects", *t.ProjectID); errors.Is(err, domain.ErrNotFound) {
-			t.ProjectID = nil
-		} else if err != nil {
+	// Resolve the project association in this transaction from the session's
+	// encoded cwd (the folder holding the .jsonl), so the match and the write are
+	// atomic: a concurrent project create/delete/repo-path change can't leave a
+	// stale association or miss a current one.
+	t.ProjectID = nil
+	if enc := filepath.Base(filepath.Dir(t.SourcePath)); enc != "" && enc != "." && enc != string(filepath.Separator) {
+		pid, err := projectIDByEncodedCWD(tx, enc)
+		if err != nil {
 			return domain.Transcript{}, err
+		}
+		if pid != "" {
+			t.ProjectID = &pid
 		}
 	}
 

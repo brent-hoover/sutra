@@ -88,9 +88,3 @@ func (s *Service) UpdateProject(id string, upd ProjectUpdate) (domain.Project, e
 func (s *Service) DeleteProject(id string) error {
 	return s.store.DeleteProject(id)
 }
-
-// projectForEncodedCWD returns the id of the project whose repo path encodes to
-// encodedCWD (see domain.EncodeCWD), or "" if none matches.
-func (s *Service) projectForEncodedCWD(encodedCWD string) (string, error) {
-	return s.store.ProjectIDByEncodedCWD(encodedCWD)
-}

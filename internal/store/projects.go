@@ -97,7 +97,13 @@ func ensureNoEncodedCollision(tx *sql.Tx, repoPath, excludeID string) error {
 // than pick one non-deterministically, an ambiguous match returns "" (no
 // association) so ingest never guesses wrong.
 func (s *Store) ProjectIDByEncodedCWD(encodedCWD string) (string, error) {
-	rows, err := s.db.Query(`SELECT id, repo_path FROM projects`)
+	return projectIDByEncodedCWD(s.db, encodedCWD)
+}
+
+// projectIDByEncodedCWD resolves a project via the given querier (DB or tx) so
+// the match can happen inside a transcript's upsert transaction.
+func projectIDByEncodedCWD(q querier, encodedCWD string) (string, error) {
+	rows, err := q.Query(`SELECT id, repo_path FROM projects`)
 	if err != nil {
 		return "", fmt.Errorf("match project by cwd: %w", err)
 	}
@@ -159,6 +165,7 @@ func (s *Store) UpdateProjectTx(id string, mutate func(*domain.Project) error) (
 	if err != nil {
 		return domain.Project{}, err // ErrNotFound when absent
 	}
+	origRepoPath := p.RepoPath
 	if err := mutate(&p); err != nil {
 		return domain.Project{}, err
 	}
@@ -166,8 +173,13 @@ func (s *Store) UpdateProjectTx(id string, mutate func(*domain.Project) error) (
 	if err := p.Validate(); err != nil {
 		return domain.Project{}, err
 	}
-	if err := ensureNoEncodedCollision(tx, p.RepoPath, p.ID); err != nil {
-		return domain.Project{}, err
+	// Only re-check encoded collisions when the repo path actually changed, so a
+	// legacy project with a colliding path can still update its other fields (and
+	// can change its path to a non-colliding one).
+	if p.RepoPath != origRepoPath {
+		if err := ensureNoEncodedCollision(tx, p.RepoPath, p.ID); err != nil {
+			return domain.Project{}, err
+		}
 	}
 	_, err = tx.Exec(
 		`UPDATE projects SET name = ?, slug = ?, repo_path = ?, description = ?, updated_at = ? WHERE id = ?`,
