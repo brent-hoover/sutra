@@ -141,7 +141,16 @@ func (s *Server) addThreadItem(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) removeThreadItem(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if err := s.svc.RemoveThreadItem(r.PathValue("id"), domain.ThreadItemKind(q.Get("kind")), q.Get("item_id")); err != nil {
+	err := s.svc.RemoveThreadItem(r.PathValue("id"), domain.ThreadItemKind(q.Get("kind")), q.Get("item_id"))
+	if errors.Is(err, domain.ErrInvalidThread) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "thread not found")
+		return
+	}
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

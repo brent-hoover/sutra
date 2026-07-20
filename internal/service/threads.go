@@ -45,11 +45,7 @@ func (s *Service) GetThread(id string) (domain.Thread, error) {
 // GetThreadView returns a thread with its members. Returns ErrNotFound if the
 // thread does not exist.
 func (s *Service) GetThreadView(id string) (domain.ThreadView, error) {
-	t, err := s.store.GetThread(id)
-	if err != nil {
-		return domain.ThreadView{}, err
-	}
-	items, err := s.store.ThreadItems(id)
+	t, items, err := s.store.GetThreadView(id)
 	if err != nil {
 		return domain.ThreadView{}, err
 	}
@@ -103,7 +99,11 @@ func (s *Service) AddThreadItem(threadID string, kind domain.ThreadItemKind, ite
 	return s.store.AddThreadItem(threadID, kind, itemID)
 }
 
-// RemoveThreadItem detaches an item from a thread (idempotent).
+// RemoveThreadItem detaches an item from a thread. The kind must be known and
+// the thread must exist; it is idempotent when the membership is simply absent.
 func (s *Service) RemoveThreadItem(threadID string, kind domain.ThreadItemKind, itemID string) error {
+	if !kind.Valid() {
+		return errors.Join(domain.ErrInvalidThread, fmt.Errorf("invalid item kind %q", kind))
+	}
 	return s.store.RemoveThreadItem(threadID, kind, itemID)
 }

@@ -74,6 +74,27 @@ func (s *Store) GetThread(id string) (domain.Thread, error) {
 	return scanThread(s.db.QueryRow(`SELECT `+threadColumns+` FROM threads WHERE id = ?`, id))
 }
 
+// GetThreadView returns a thread and its members read in one transaction, so a
+// concurrent delete cannot yield a thread with an impossible membership set.
+// Returns ErrNotFound if the thread does not exist.
+func (s *Store) GetThreadView(id string) (domain.Thread, []domain.ThreadItem, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.Thread{}, nil, err
+	}
+	defer tx.Rollback()
+
+	t, err := scanThread(tx.QueryRow(`SELECT `+threadColumns+` FROM threads WHERE id = ?`, id))
+	if err != nil {
+		return domain.Thread{}, nil, err
+	}
+	items, err := threadItems(tx, id)
+	if err != nil {
+		return domain.Thread{}, nil, err
+	}
+	return t, items, nil
+}
+
 // ListThreads returns threads ordered by creation. If projectID is non-empty it
 // restricts to that project.
 func (s *Store) ListThreads(projectID string) ([]domain.Thread, error) {
@@ -190,20 +211,37 @@ func (s *Store) AddThreadItem(threadID string, kind domain.ThreadItemKind, itemI
 	return tx.Commit()
 }
 
-// RemoveThreadItem detaches an item from a thread (idempotent).
+// RemoveThreadItem detaches an item from a thread. It verifies the thread exists
+// (ErrNotFound otherwise) in the same transaction, and is idempotent when the
+// membership is simply absent.
 func (s *Store) RemoveThreadItem(threadID string, kind domain.ThreadItemKind, itemID string) error {
-	if _, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := existsInTx(tx, "threads", threadID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
 		`DELETE FROM thread_item WHERE thread_id = ? AND kind = ? AND item_id = ?`,
 		threadID, string(kind), itemID,
 	); err != nil {
 		return fmt.Errorf("detach thread item: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ThreadItems returns a thread's members in the order they were added.
 func (s *Store) ThreadItems(threadID string) ([]domain.ThreadItem, error) {
-	rows, err := s.db.Query(
+	return threadItems(s.db, threadID)
+}
+
+// threadItems reads a thread's members via the given querier (DB or tx) so it
+// can participate in a consistent-snapshot transaction.
+func threadItems(q querier, threadID string) ([]domain.ThreadItem, error) {
+	rows, err := q.Query(
 		`SELECT kind, item_id, added_at FROM thread_item WHERE thread_id = ? ORDER BY added_at, item_id`, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("list thread items: %w", err)
