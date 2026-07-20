@@ -42,7 +42,7 @@ func TestReconcileSearch(t *testing.T) {
 		ID: domain.NewID(), SessionID: "backfill-session", SourcePath: "/x.jsonl",
 		CapturedAt: now, CreatedAt: now,
 		Messages: []domain.Message{{Seq: 0, Role: domain.RoleUser, Text: "message has " + term, Raw: "{}"}},
-	}); err != nil {
+	}, ""); err != nil {
 		t.Fatalf("upsert transcript: %v", err)
 	}
 

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/brent-hoover/sutra/internal/domain"
@@ -77,7 +76,7 @@ func (s *Store) addColumnIfMissing(table, column, decl string) error {
 // Re-ingesting the same session_id updates the existing Transcript in place and
 // replaces its Message rows (idempotent — never duplicated). The stored
 // transcript, including its persisted id and messages, is returned.
-func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error) {
+func (s *Store) UpsertTranscript(t domain.Transcript, encodedCWD string) (domain.Transcript, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return domain.Transcript{}, err
@@ -85,12 +84,13 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 	defer tx.Rollback()
 
 	// Resolve the project association in this transaction from the session's
-	// encoded cwd (the folder holding the .jsonl), so the match and the write are
-	// atomic: a concurrent project create/delete/repo-path change can't leave a
-	// stale association or miss a current one.
+	// encoded cwd (its top-level folder under the projects dir, computed by the
+	// caller), so the match and the write are atomic: a concurrent project
+	// create/delete/repo-path change can't leave a stale association or miss a
+	// current one.
 	t.ProjectID = nil
-	if enc := filepath.Base(filepath.Dir(t.SourcePath)); enc != "" && enc != "." && enc != string(filepath.Separator) {
-		pid, err := projectIDByEncodedCWD(tx, enc)
+	if encodedCWD != "" {
+		pid, err := projectIDByEncodedCWD(tx, encodedCWD)
 		if err != nil {
 			return domain.Transcript{}, err
 		}

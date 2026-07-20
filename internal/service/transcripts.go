@@ -95,12 +95,15 @@ func (s *Service) IngestTranscript(path string) (domain.Transcript, error) {
 		t.CapturedAt = info.ModTime().UTC()
 	}
 
-	// Project auto-association is resolved inside UpsertTranscript's transaction
-	// (from the session's encoded cwd) so the match and write are atomic.
 	if err := t.Validate(); err != nil {
 		return domain.Transcript{}, err
 	}
-	return s.store.UpsertTranscript(t)
+	// The encoded cwd is the top-level folder under the projects dir (the repo),
+	// regardless of how deeply the .jsonl is nested (e.g. subagent transcripts).
+	// UpsertTranscript resolves the project from it inside its transaction so the
+	// match and write are atomic.
+	encodedCWD := strings.SplitN(filepath.ToSlash(rel), "/", 2)[0]
+	return s.store.UpsertTranscript(t, encodedCWD)
 }
 
 // GetTranscript returns a transcript and its messages in seq order.

@@ -51,7 +51,7 @@ func TestUpsertBackfillsSourceMtimeForMigratedRow(t *testing.T) {
 		ID: domain.NewID(), SessionID: "sess-mig", SourcePath: "/x/sess-mig.jsonl",
 		CapturedAt: now.Add(-72 * time.Hour), CreatedAt: now, SourceMtime: now.Add(-time.Hour),
 		Messages: msgs,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestUpsertBackfillsSourceMtimeForMigratedRow(t *testing.T) {
 		ID: domain.NewID(), SessionID: "sess-mig", SourcePath: "/x/sess-mig.jsonl",
 		CapturedAt: now.Add(-72 * time.Hour), CreatedAt: now, SourceMtime: fresh,
 		Messages: msgs,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("re-ingest: %v", err)
 	}
