@@ -117,28 +117,34 @@ func TestWriteSkillConcurrent(t *testing.T) {
 	}
 }
 
-// A failed write must not truncate or destroy an already-installed skill: the
-// atomic temp-then-rename keeps the existing SKILL.md intact.
+// A failed install must not truncate or destroy existing content: the atomic
+// temp-then-rename keeps it intact. The failure is triggered deterministically
+// (cross-platform, privilege-independent) by making the destination a non-empty
+// directory so the final rename cannot succeed.
 func TestWriteSkillPreservesExistingOnFailure(t *testing.T) {
 	target := t.TempDir()
-	if _, err := writeSkill(target, "graphify", "original"); err != nil {
-		t.Fatalf("first install: %v", err)
-	}
 	skillDir := filepath.Join(target, "graphify")
-	// Make the skill dir read-only so creating the temp file fails.
-	if err := os.Chmod(skillDir, 0o500); err != nil {
-		t.Fatalf("chmod: %v", err)
+	mdDir := filepath.Join(skillDir, "SKILL.md")
+	if err := os.MkdirAll(mdDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
-	t.Cleanup(func() { os.Chmod(skillDir, 0o755) })
+	keep := filepath.Join(mdDir, "keep.txt")
+	if err := os.WriteFile(keep, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("write existing: %v", err)
+	}
 
 	if _, err := writeSkill(target, "graphify", "replacement"); err == nil {
-		t.Fatal("expected write failure into a read-only skill dir")
+		t.Fatal("expected rename over a non-empty directory to fail")
 	}
-	got, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
-	if err != nil {
-		t.Fatalf("read existing: %v", err)
+	// Existing content survives untouched.
+	if got, err := os.ReadFile(keep); err != nil || string(got) != "keep" {
+		t.Errorf("existing content not preserved: got %q err %v", got, err)
 	}
-	if string(got) != "original" {
-		t.Errorf("existing skill corrupted on failed install: content = %q, want %q", got, "original")
+	// The failed install left no temp file behind.
+	entries, _ := os.ReadDir(skillDir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("leftover temp file after failed install: %s", e.Name())
+		}
 	}
 }
