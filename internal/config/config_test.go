@@ -108,6 +108,47 @@ projects_dir = "~/work/projects"
 	}
 }
 
+func TestLoadRejectsInsecurePermsWithToken(t *testing.T) {
+	home := writeConfig(t, `token = "s3cret"`)
+	path := filepath.Join(home, "sutra", "config.toml")
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() = nil error, want an error for a group/world-readable token file")
+	}
+}
+
+func TestLoadAllowsSecurePermsWithToken(t *testing.T) {
+	home := writeConfig(t, `token = "s3cret"`)
+	path := filepath.Join(home, "sutra", "config.toml")
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Token != "s3cret" {
+		t.Errorf("Token = %q, want %q", cfg.Token, "s3cret")
+	}
+}
+
+func TestLoadIgnoresPermsWithoutToken(t *testing.T) {
+	// No secret in the file: loose perms are harmless and must not block startup.
+	home := writeConfig(t, `listen_addr = "127.0.0.1:9001"`)
+	path := filepath.Join(home, "sutra", "config.toml")
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	if _, err := Load(); err != nil {
+		t.Errorf("Load() = %v, want nil for a token-less loose-perm file", err)
+	}
+}
+
 func TestLoadMalformedFileErrors(t *testing.T) {
 	writeConfig(t, "listen_addr = = broken")
 

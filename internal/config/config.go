@@ -40,16 +40,29 @@ func Load() (Config, error) {
 	cfg := defaults()
 
 	path := ConfigPath()
-	var fc fileConfig
-	md, err := toml.DecodeFile(path, &fc)
+	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cfg, nil
 		}
 		return Config{}, fmt.Errorf("reading config %s: %w", path, err)
 	}
+
+	var fc fileConfig
+	md, err := toml.DecodeFile(path, &fc)
+	if err != nil {
+		return Config{}, fmt.Errorf("reading config %s: %w", path, err)
+	}
 	if undecoded := md.Undecoded(); len(undecoded) > 0 {
 		return Config{}, fmt.Errorf("unknown key(s) in config %s: %v", path, undecoded)
+	}
+
+	// A plaintext token must not be readable by other users. Like ssh and
+	// postgres, refuse to start when the file holding it is group/world-accessible.
+	if fc.Token != "" {
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			return Config{}, fmt.Errorf("config %s has insecure permissions %#o: it contains a token, so it must be owner-only (chmod 600)", path, perm)
+		}
 	}
 
 	if fc.ListenAddr != "" {

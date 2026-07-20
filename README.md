@@ -64,8 +64,9 @@ projects_dir = "~/.claude/projects"     # dir transcript ingest/discover is conf
 | `db_path`      | `~/.sutra/sutra.db`         | SQLite database file                                   |
 | `projects_dir` | `~/.claude/projects`        | Directory transcript ingest/discover is confined to    |
 
-> The `token` is a secret in plaintext — keep the file private
-> (`chmod 600 ~/.config/sutra/config.toml`).
+> The `token` is a secret in plaintext. When the file sets a `token`, Sutra
+> **refuses to start unless the file is owner-only** (`chmod 600
+> ~/.config/sutra/config.toml`), the same posture as SSH and Postgres.
 
 ## Command reference
 
