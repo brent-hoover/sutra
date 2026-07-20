@@ -10,6 +10,7 @@ import (
 
 	"github.com/brent-hoover/sutra/internal/client"
 	"github.com/brent-hoover/sutra/internal/config"
+	"github.com/brent-hoover/sutra/internal/domain"
 	"github.com/spf13/cobra"
 )
 
@@ -238,11 +239,13 @@ func writeSkill(target, slug, content string) (string, error) {
 		return "", err
 	}
 	rel := filepath.Join(slug, "SKILL.md")
-	tmpRel := filepath.Join(slug, ".SKILL.md.tmp")
+	// A uniquely-named temp created with O_EXCL: exclusive creation fails on a
+	// pre-existing file/symlink at the name (so a planted symlink can't redirect
+	// or truncate another file), and the unique name keeps concurrent installs
+	// from clashing on a shared temp. It is then atomically renamed over SKILL.md.
+	tmpRel := filepath.Join(slug, ".SKILL.md."+domain.NewID()+".tmp")
 
-	// Write to a temp file, then atomically rename it over SKILL.md, so a failed
-	// write/close never leaves an existing installed skill truncated or partial.
-	f, err := root.OpenFile(tmpRel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	f, err := root.OpenFile(tmpRel, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
 	if err != nil {
 		return "", err
 	}

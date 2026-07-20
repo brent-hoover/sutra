@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -74,6 +77,43 @@ func TestWriteSkillReplacesEscapingFileSymlink(t *testing.T) {
 	got, _ := os.ReadFile(real)
 	if string(got) != "safe" {
 		t.Errorf("content = %q, want %q", got, "safe")
+	}
+}
+
+// Concurrent installs of the same skill must not clash on a shared temp file or
+// corrupt the result: each uses a unique temp name and an atomic rename, so the
+// final SKILL.md is always one writer's complete content.
+func TestWriteSkillConcurrent(t *testing.T) {
+	target := t.TempDir()
+	const n = 12
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = writeSkill(target, "graphify", fmt.Sprintf("content-%d", i))
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("writer %d: %v", i, err)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(target, "graphify", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.HasPrefix(string(got), "content-") {
+		t.Errorf("final content not a complete writer value: %q", got)
+	}
+	// No leftover temp files.
+	entries, _ := os.ReadDir(filepath.Join(target, "graphify"))
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("leftover temp file: %s", e.Name())
+		}
 	}
 }
 
