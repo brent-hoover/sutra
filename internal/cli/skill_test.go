@@ -105,8 +105,14 @@ func TestWriteSkillConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if !strings.HasPrefix(string(got), "content-") {
-		t.Errorf("final content not a complete writer value: %q", got)
+	// The final content must be exactly one writer's complete value, never a
+	// truncated or interleaved result.
+	valid := make(map[string]bool, n)
+	for i := 0; i < n; i++ {
+		valid[fmt.Sprintf("content-%d", i)] = true
+	}
+	if !valid[string(got)] {
+		t.Errorf("final content %q is not one complete writer value", got)
 	}
 	// No leftover temp files.
 	entries, _ := os.ReadDir(filepath.Join(target, "graphify"))
