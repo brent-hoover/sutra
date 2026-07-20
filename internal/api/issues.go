@@ -39,25 +39,13 @@ func (s *Server) createIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var issue domain.Issue
-	var err error
-	switch {
-	case req.ParentID != nil:
-		// A supplied parent_id (even empty) must reference an existing issue;
-		// only an absent field means "no parent".
-		issue, err = s.svc.CreateChildIssue(req.Subject, req.Body, *req.ParentID)
-		if errors.Is(err, domain.ErrNotFound) {
-			writeError(w, http.StatusBadRequest, "parent issue not found")
-			return
-		}
-	case req.ProjectID != nil:
-		issue, err = s.svc.CreateIssueInProject(req.Subject, req.Body, *req.ProjectID)
-		if errors.Is(err, domain.ErrNotFound) {
-			writeError(w, http.StatusBadRequest, "project not found")
-			return
-		}
-	default:
-		issue, err = s.svc.CreateIssue(req.Subject, req.Body)
+	// A supplied parent_id/project_id (even empty) must reference an existing
+	// entity; both may be set together. An absent field (nil pointer) means
+	// "none".
+	issue, err := s.svc.CreateIssueWith(req.Subject, req.Body, req.ParentID, req.ProjectID)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusBadRequest, "parent or project not found")
+		return
 	}
 	if errors.Is(err, domain.ErrInvalidIssue) {
 		writeError(w, http.StatusBadRequest, err.Error())

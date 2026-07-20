@@ -14,28 +14,29 @@ func (s *Service) CreateIssue(subject, body string) (domain.Issue, error) {
 	return s.createIssue(subject, body, nil, nil)
 }
 
-// CreateIssueInProject creates an issue scoped to a project (projectID may be
-// empty for none). The project must exist. Returns ErrNotFound if it is missing.
+// CreateIssueInProject creates an issue scoped to a project (empty projectID
+// means none). Returns ErrNotFound if the project is missing.
 func (s *Service) CreateIssueInProject(subject, body, projectID string) (domain.Issue, error) {
 	var pid *string
 	if projectID != "" {
-		if _, err := s.store.GetProject(projectID); err != nil {
-			return domain.Issue{}, err
-		}
 		pid = &projectID
 	}
 	return s.createIssue(subject, body, nil, pid)
 }
 
-// CreateChildIssue creates an issue whose parent_id is set to parentID. The
-// parent must exist. Because the child is a fresh leaf, this cannot introduce a
-// cycle or a self-link, and the issue and its parent link are persisted in the
-// one insert (no orphan window). Returns ErrNotFound if the parent is missing.
+// CreateChildIssue creates an issue whose parent_id is set to parentID. Returns
+// ErrNotFound if the parent is missing. A fresh leaf cannot introduce a cycle.
 func (s *Service) CreateChildIssue(subject, body, parentID string) (domain.Issue, error) {
-	if _, err := s.store.GetIssue(parentID); err != nil {
-		return domain.Issue{}, err
-	}
 	return s.createIssue(subject, body, &parentID, nil)
+}
+
+// CreateIssueWith creates an issue with an optional parent and/or project. A nil
+// pointer means "none"; a non-nil pointer (even to "") is treated as a reference
+// that must exist. Both are validated inside the insert transaction
+// (store.CreateIssue), so neither can dangle. Returns ErrNotFound if a supplied
+// reference does not exist.
+func (s *Service) CreateIssueWith(subject, body string, parentID, projectID *string) (domain.Issue, error) {
+	return s.createIssue(subject, body, parentID, projectID)
 }
 
 func (s *Service) createIssue(subject, body string, parentID, projectID *string) (domain.Issue, error) {

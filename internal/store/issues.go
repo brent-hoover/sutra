@@ -19,6 +19,19 @@ func (s *Store) CreateIssue(issue domain.Issue, ledger []domain.LedgerEntry) err
 	}
 	defer tx.Rollback()
 
+	// Validate references in the same transaction as the insert, so a concurrent
+	// delete of the parent or project can't leave a dangling reference.
+	if issue.ParentID != nil {
+		if err := existsInTx(tx, "issues", *issue.ParentID); err != nil {
+			return err
+		}
+	}
+	if issue.ProjectID != nil {
+		if err := existsInTx(tx, "projects", *issue.ProjectID); err != nil {
+			return err
+		}
+	}
+
 	if _, err := tx.Exec(
 		`INSERT INTO issues (id, subject, body, type, status, priority, owner, parent_id, project_id, deleted_at, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

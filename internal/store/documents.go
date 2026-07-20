@@ -176,6 +176,11 @@ func (s *Store) DeleteDocument(id string) error {
 	if _, err := tx.Exec(`DELETE FROM documents WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete document: %w", err)
 	}
+	// A hard-deleted document must not leave dangling thread memberships (the
+	// invariant is that attached items exist), so remove them in the same tx.
+	if _, err := tx.Exec(`DELETE FROM thread_item WHERE kind = 'document' AND item_id = ?`, id); err != nil {
+		return fmt.Errorf("detach document from threads: %w", err)
+	}
 	now := time.Now().UTC()
 	if _, err := tx.Exec(
 		`UPDATE issues SET updated_at = ? WHERE id = ?`,

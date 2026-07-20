@@ -41,10 +41,20 @@ CREATE TABLE IF NOT EXISTS projects (
 	return nil
 }
 
-// CreateProject inserts a project. A duplicate slug or repo_path is rejected as
-// ErrInvalidProject (the UNIQUE constraints).
+// CreateProject inserts a project in one transaction, rejecting a duplicate
+// slug/repo_path (UNIQUE) and a repo path whose encoded-cwd collides with an
+// existing project's (EncodeCWD is not injective) — both as ErrInvalidProject.
 func (s *Store) CreateProject(p domain.Project) error {
-	_, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := ensureNoEncodedCollision(tx, p.RepoPath, ""); err != nil {
+		return err
+	}
+	_, err = tx.Exec(
 		`INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Slug, p.RepoPath, p.Description,
 		p.CreatedAt.Format(timeFmt), p.UpdatedAt.Format(timeFmt),
@@ -55,7 +65,51 @@ func (s *Store) CreateProject(p domain.Project) error {
 	if err != nil {
 		return fmt.Errorf("insert project: %w", err)
 	}
-	return nil
+	return tx.Commit()
+}
+
+// ensureNoEncodedCollision returns ErrInvalidProject if another project (id !=
+// excludeID) has a repo path that encodes to the same folder as repoPath, which
+// would make transcript auto-association ambiguous.
+func ensureNoEncodedCollision(tx *sql.Tx, repoPath, excludeID string) error {
+	want := domain.EncodeCWD(repoPath)
+	rows, err := tx.Query(`SELECT id, repo_path FROM projects`)
+	if err != nil {
+		return fmt.Errorf("check encoded collision: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, rp string
+		if err := rows.Scan(&id, &rp); err != nil {
+			return err
+		}
+		if id != excludeID && domain.EncodeCWD(rp) == want {
+			return errors.Join(domain.ErrInvalidProject,
+				fmt.Errorf("repo path encodes to the same folder as an existing project: %q", rp))
+		}
+	}
+	return rows.Err()
+}
+
+// ProjectIDByRepoPath returns the id of the project whose repo path encodes to
+// the same folder as the given encoded cwd, or "" if none. (Encodings are
+// unique across projects, enforced by ensureNoEncodedCollision.)
+func (s *Store) ProjectIDByEncodedCWD(encodedCWD string) (string, error) {
+	rows, err := s.db.Query(`SELECT id, repo_path FROM projects`)
+	if err != nil {
+		return "", fmt.Errorf("match project by cwd: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, rp string
+		if err := rows.Scan(&id, &rp); err != nil {
+			return "", err
+		}
+		if domain.EncodeCWD(rp) == encodedCWD {
+			return id, nil
+		}
+	}
+	return "", rows.Err()
 }
 
 // GetProject returns a project by id, or ErrNotFound.
@@ -81,27 +135,45 @@ func (s *Store) ListProjects() ([]domain.Project, error) {
 	return out, rows.Err()
 }
 
-// UpdateProject writes name, slug, description, and repo_path (and updated_at).
-// A duplicate slug/repo_path is ErrInvalidProject; a missing id is ErrNotFound.
-func (s *Store) UpdateProject(p domain.Project) error {
-	res, err := s.db.Exec(
+// UpdateProjectTx reads a project, applies mutate, stamps updated_at, validates,
+// and writes — all in one transaction, so concurrent updates cannot clobber one
+// another or regress updated_at. A duplicate/colliding slug or repo_path is
+// ErrInvalidProject; a missing id is ErrNotFound.
+func (s *Store) UpdateProjectTx(id string, mutate func(*domain.Project) error) (domain.Project, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.Project{}, err
+	}
+	defer tx.Rollback()
+
+	p, err := scanProject(tx.QueryRow(`SELECT `+projectColumns+` FROM projects WHERE id = ?`, id))
+	if err != nil {
+		return domain.Project{}, err // ErrNotFound when absent
+	}
+	if err := mutate(&p); err != nil {
+		return domain.Project{}, err
+	}
+	p.UpdatedAt = time.Now().UTC()
+	if err := p.Validate(); err != nil {
+		return domain.Project{}, err
+	}
+	if err := ensureNoEncodedCollision(tx, p.RepoPath, p.ID); err != nil {
+		return domain.Project{}, err
+	}
+	_, err = tx.Exec(
 		`UPDATE projects SET name = ?, slug = ?, repo_path = ?, description = ?, updated_at = ? WHERE id = ?`,
 		p.Name, p.Slug, p.RepoPath, p.Description, p.UpdatedAt.Format(timeFmt), p.ID,
 	)
 	if isUniqueViolation(err) {
-		return errors.Join(domain.ErrInvalidProject, fmt.Errorf("slug %q or repo_path %q already exists", p.Slug, p.RepoPath))
+		return domain.Project{}, errors.Join(domain.ErrInvalidProject, fmt.Errorf("slug %q or repo_path %q already exists", p.Slug, p.RepoPath))
 	}
 	if err != nil {
-		return fmt.Errorf("update project: %w", err)
+		return domain.Project{}, fmt.Errorf("update project: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
+	if err := tx.Commit(); err != nil {
+		return domain.Project{}, err
 	}
-	if n == 0 {
-		return domain.ErrNotFound
-	}
-	return nil
+	return p, nil
 }
 
 // DeleteProject removes a project and detaches its references: issues, threads,
@@ -114,11 +186,34 @@ func (s *Store) DeleteProject(id string) error {
 	}
 	defer tx.Rollback()
 
-	for _, table := range []string{"issues", "threads", "transcripts"} {
-		if _, err := tx.Exec(`UPDATE `+table+` SET project_id = NULL WHERE project_id = ?`, id); err != nil {
-			return fmt.Errorf("detach %s: %w", table, err)
+	now := time.Now().UTC()
+
+	// Detach issues one by one so each detachment advances updated_at and appends
+	// a ledger entry (the issue contract requires both for every change), keeping
+	// the detach visible in history and the activity feed.
+	issueIDs, err := scanIDs(tx, `SELECT id FROM issues WHERE project_id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("find scoped issues: %w", err)
+	}
+	for _, iid := range issueIDs {
+		if _, err := tx.Exec(`UPDATE issues SET project_id = NULL, updated_at = ? WHERE id = ?`, now.Format(timeFmt), iid); err != nil {
+			return fmt.Errorf("detach issue: %w", err)
+		}
+		if err := insertLedger(tx, []domain.LedgerEntry{{
+			ID: domain.NewID(), IssueID: iid, At: now, Kind: domain.LedgerUpdated,
+			Field: "project_id", OldValue: id, NewValue: "",
+		}}); err != nil {
+			return err
 		}
 	}
+	// Threads carry no ledger; advance their updated_at on detach.
+	if _, err := tx.Exec(`UPDATE threads SET project_id = NULL, updated_at = ? WHERE project_id = ?`, now.Format(timeFmt), id); err != nil {
+		return fmt.Errorf("detach threads: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE transcripts SET project_id = NULL WHERE project_id = ?`, id); err != nil {
+		return fmt.Errorf("detach transcripts: %w", err)
+	}
+
 	res, err := tx.Exec(`DELETE FROM projects WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete project: %w", err)
@@ -131,6 +226,24 @@ func (s *Store) DeleteProject(id string) error {
 		return domain.ErrNotFound
 	}
 	return tx.Commit()
+}
+
+// scanIDs runs a single-column id query and returns the ids.
+func scanIDs(tx *sql.Tx, query string, args ...any) ([]string, error) {
+	rows, err := tx.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func scanProject(row rowScanner) (domain.Project, error) {

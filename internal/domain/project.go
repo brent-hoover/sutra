@@ -2,6 +2,8 @@ package domain
 
 import (
 	"errors"
+	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -30,6 +32,11 @@ func (p Project) Validate() error {
 	}
 	if strings.TrimSpace(p.RepoPath) == "" {
 		return errors.Join(ErrInvalidProject, errors.New("repo_path is required"))
+	}
+	// 1 project = 1 repo: the path is the identity/match key, so it must be an
+	// absolute path supplied by the caller — never resolved server-side.
+	if !filepath.IsAbs(p.RepoPath) {
+		return errors.Join(ErrInvalidProject, fmt.Errorf("repo_path must be absolute: %q", p.RepoPath))
 	}
 	if p.Slug == "" {
 		return errors.Join(ErrInvalidProject, errors.New("slug is required"))

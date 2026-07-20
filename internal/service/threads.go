@@ -75,27 +75,18 @@ type ThreadUpdate struct {
 // UpdateThread applies the non-nil fields of upd. Returns ErrNotFound if the
 // thread does not exist, or ErrInvalidThread on a bad status.
 func (s *Service) UpdateThread(id string, upd ThreadUpdate) (domain.Thread, error) {
-	t, err := s.store.GetThread(id)
-	if err != nil {
-		return domain.Thread{}, err
-	}
-	if upd.Title != nil {
-		t.Title = *upd.Title
-	}
-	if upd.Body != nil {
-		t.Body = *upd.Body
-	}
-	if upd.Status != nil {
-		t.Status = *upd.Status
-	}
-	t.UpdatedAt = time.Now().UTC()
-	if err := t.Validate(); err != nil {
-		return domain.Thread{}, err
-	}
-	if err := s.store.UpdateThread(t); err != nil {
-		return domain.Thread{}, err
-	}
-	return t, nil
+	return s.store.UpdateThreadTx(id, func(t *domain.Thread) error {
+		if upd.Title != nil {
+			t.Title = *upd.Title
+		}
+		if upd.Body != nil {
+			t.Body = *upd.Body
+		}
+		if upd.Status != nil {
+			t.Status = *upd.Status
+		}
+		return nil
+	})
 }
 
 // DeleteThread removes a thread and its memberships (members are untouched).

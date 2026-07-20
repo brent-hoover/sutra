@@ -83,6 +83,16 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 	}
 	defer tx.Rollback()
 
+	// If the auto-associated project was deleted between the match and now, drop
+	// the association rather than fail ingest or store a dangling reference.
+	if t.ProjectID != nil {
+		if err := existsInTx(tx, "projects", *t.ProjectID); errors.Is(err, domain.ErrNotFound) {
+			t.ProjectID = nil
+		} else if err != nil {
+			return domain.Transcript{}, err
+		}
+	}
+
 	// Reuse the existing row (id + created_at) when the session already exists.
 	// issue_id is deliberately left untouched by the UPDATE below so that
 	// re-ingesting a linked transcript preserves its issue link.

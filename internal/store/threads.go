@@ -45,17 +45,28 @@ CREATE INDEX IF NOT EXISTS idx_thread_item_thread ON thread_item (thread_id);`
 	return nil
 }
 
-// CreateThread inserts a thread.
+// CreateThread inserts a thread, validating its project reference (if any) in
+// the same transaction so a concurrent project delete can't leave it dangling.
 func (s *Store) CreateThread(t domain.Thread) error {
-	_, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if t.ProjectID != nil {
+		if err := existsInTx(tx, "projects", *t.ProjectID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(
 		`INSERT INTO threads (`+threadColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, nullString(t.ProjectID), t.Title, t.Body, string(t.Status),
 		t.CreatedAt.Format(timeFmt), t.UpdatedAt.Format(timeFmt),
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("insert thread: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // GetThread returns a thread by id, or ErrNotFound.
@@ -89,24 +100,37 @@ func (s *Store) ListThreads(projectID string) ([]domain.Thread, error) {
 	return out, rows.Err()
 }
 
-// UpdateThread writes title, body, status, project_id, and updated_at. Returns
-// ErrNotFound if the thread does not exist.
-func (s *Store) UpdateThread(t domain.Thread) error {
-	res, err := s.db.Exec(
+// UpdateThreadTx reads a thread, applies mutate, stamps updated_at, validates,
+// and writes — all in one transaction, so concurrent updates cannot clobber one
+// another or regress updated_at. Returns ErrNotFound if the thread is missing.
+func (s *Store) UpdateThreadTx(id string, mutate func(*domain.Thread) error) (domain.Thread, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.Thread{}, err
+	}
+	defer tx.Rollback()
+
+	t, err := scanThread(tx.QueryRow(`SELECT `+threadColumns+` FROM threads WHERE id = ?`, id))
+	if err != nil {
+		return domain.Thread{}, err // ErrNotFound when absent
+	}
+	if err := mutate(&t); err != nil {
+		return domain.Thread{}, err
+	}
+	t.UpdatedAt = time.Now().UTC()
+	if err := t.Validate(); err != nil {
+		return domain.Thread{}, err
+	}
+	if _, err := tx.Exec(
 		`UPDATE threads SET project_id = ?, title = ?, body = ?, status = ?, updated_at = ? WHERE id = ?`,
 		nullString(t.ProjectID), t.Title, t.Body, string(t.Status), t.UpdatedAt.Format(timeFmt), t.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("update thread: %w", err)
+	); err != nil {
+		return domain.Thread{}, fmt.Errorf("update thread: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
+	if err := tx.Commit(); err != nil {
+		return domain.Thread{}, err
 	}
-	if n == 0 {
-		return domain.ErrNotFound
-	}
-	return nil
+	return t, nil
 }
 
 // DeleteThread removes a thread and its memberships (thread_item rows). The
