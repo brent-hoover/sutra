@@ -32,6 +32,20 @@ func (s *Store) CreateIssue(issue domain.Issue, ledger []domain.LedgerEntry) err
 		}
 	}
 
+	if err := insertIssueTx(tx, issue); err != nil {
+		return err
+	}
+
+	if err := insertLedger(tx, ledger); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// insertIssueTx inserts one issue row within an existing transaction. Shared by
+// CreateIssue and BuildPlan so the column list lives in exactly one place.
+func insertIssueTx(tx *sql.Tx, issue domain.Issue) error {
 	if _, err := tx.Exec(
 		`INSERT INTO issues (id, subject, body, type, status, priority, owner, parent_id, project_id, approval, deleted_at, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -41,12 +55,7 @@ func (s *Store) CreateIssue(issue domain.Issue, ledger []domain.LedgerEntry) err
 	); err != nil {
 		return fmt.Errorf("insert issue: %w", err)
 	}
-
-	if err := insertLedger(tx, ledger); err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return nil
 }
 
 // UpdateIssueTx reads the issue, hands it to mutate for in-place modification,
