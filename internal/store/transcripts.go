@@ -87,19 +87,17 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 	// re-ingesting a linked transcript preserves its issue link.
 	var (
 		existingID, existingCreated string
-		existingMtime               string
 		existingIssueID             sql.NullString
 	)
 	// logReingest records whether this upsert is a genuine content change of a
 	// previously-recorded, issue-linked session, and thus warrants a ledger
-	// entry + issue bump below. It stays false for first ingests and for a
-	// first-time source_mtime backfill of a pre-source_mtime (migrated) row.
+	// entry + issue bump below. It stays false for first ingests and for
+	// metadata-only (unchanged-content) refreshes.
 	logReingest := false
-	err = tx.QueryRow(`SELECT id, created_at, issue_id, source_mtime FROM transcripts WHERE session_id = ?`, t.SessionID).
-		Scan(&existingID, &existingCreated, &existingIssueID, &existingMtime)
+	err = tx.QueryRow(`SELECT id, created_at, issue_id FROM transcripts WHERE session_id = ?`, t.SessionID).
+		Scan(&existingID, &existingCreated, &existingIssueID)
 	switch {
 	case err == nil:
-		_ = existingMtime // mtime is a feed hint, not the change-detection authority
 		t.ID = existingID
 		if t.CreatedAt, err = time.Parse(timeFmt, existingCreated); err != nil {
 			return domain.Transcript{}, fmt.Errorf("parse created_at: %w", err)
@@ -113,15 +111,25 @@ func (s *Store) UpsertTranscript(t domain.Transcript) (domain.Transcript, error)
 		if err != nil {
 			return domain.Transcript{}, err
 		}
-		if prevSig == contentSignature(t.Messages) {
-			_ = tx.Rollback()
-			return s.GetTranscript(t.ID)
-		}
+		changed := prevSig != contentSignature(t.Messages)
+
+		// Always refresh lightweight metadata, including source_mtime (which
+		// drives the activity feed's window). This backfills source_mtime for rows
+		// migrated in before the column existed, so a recently-modified session is
+		// placed in the window even when its content is unchanged.
 		if _, err := tx.Exec(
 			`UPDATE transcripts SET source_path = ?, title = ?, captured_at = ?, source_mtime = ? WHERE id = ?`,
 			t.SourcePath, t.Title, t.CapturedAt.Format(timeFmt), mtimeStr(t.SourceMtime), t.ID,
 		); err != nil {
 			return domain.Transcript{}, fmt.Errorf("update transcript: %w", err)
+		}
+		if !changed {
+			// Metadata-only refresh: skip message churn and any ledger activity,
+			// but commit so the refreshed source_mtime persists.
+			if err := tx.Commit(); err != nil {
+				return domain.Transcript{}, fmt.Errorf("commit metadata refresh: %w", err)
+			}
+			return s.GetTranscript(t.ID)
 		}
 		// The content genuinely changed; if the session is linked, that changes
 		// data tied to its issue, so record it.
