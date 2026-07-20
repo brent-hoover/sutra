@@ -177,8 +177,8 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 }
 
 // resolve joins the base URL and endpoint path safely, so a trailing slash on
-// SUTRA_HOST does not produce "//issues" (which would trigger a redirect that
-// downgrades POST to GET).
+// the configured host does not produce "//issues" (which would trigger a
+// redirect that downgrades POST to GET).
 func (c *Client) resolve(path string) (string, error) {
 	base, err := url.Parse(c.baseURL)
 	if err != nil {

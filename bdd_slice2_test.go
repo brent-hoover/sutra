@@ -4,8 +4,8 @@ package main_test
 // registered operation is reachable as JSON over HTTP; the CLI is a thin JSON
 // client that makes exactly one request and prints the response byte-for-byte;
 // bearer-token auth gates LAN access; and a client honors a configured remote
-// endpoint. The harness runs with SUTRA_TOKEN set, so the daemon enforces auth
-// and the client sends it.
+// endpoint. The harness configures a token, so the daemon enforces auth and the
+// client sends it.
 
 import (
 	"context"
@@ -260,10 +260,10 @@ func registerSlice2Steps(sc *godog.ScenarioContext, w *world) {
 	})
 
 	// --- Use clients from another machine ---
-	sc.Step(`^SUTRA_HOST set to the daemon's LAN address and a valid token$`, func() error {
+	sc.Step(`^a configured host set to the daemon's LAN address and a valid token$`, func() error {
 		// Stand up a DISTINCT daemon (its own store) and point the client at it,
-		// proving the client honors the configured SUTRA_HOST rather than a
-		// hardcoded endpoint.
+		// proving the client honors the configured host rather than a hardcoded
+		// endpoint.
 		var err error
 		if remoteDir, err = os.MkdirTemp("", "sutra-remote-"); err != nil {
 			return err

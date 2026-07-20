@@ -4,7 +4,7 @@ package main_test
 // view, serve), @slice3 (list, update, comment, soft-delete, history, filter),
 // @slice5 (document attach/read/list/update/remove), and @slice6 (transcript
 // ingest/re-ingest/link/view/read/discover). Each scenario drives the real
-// binary surface: config.Load reads the environment, the actual Cobra `serve`
+// binary surface: the harness injects a config.Config, the actual Cobra `serve`
 // command starts the daemon (graceful shutdown on ctx cancel), and the CLI
 // subcommands run as real Cobra commands whose --json output is parsed. A
 // second service handle on the same DB verifies ledger and stored state.
@@ -30,22 +30,21 @@ import (
 )
 
 type world struct {
-	dir       string
-	cfg       config.Config
-	verify    *service.Service // second handle for reading ledger state
-	serveCtx  context.Context
-	cancel    context.CancelFunc
-	serveCh   chan error // receives the serve command's exit error
-	subject   string
-	body      string
-	issue     domain.Issue
-	updated   domain.Issue   // issue as returned after an update
-	issues    []domain.Issue // issues created for list/filter scenarios
-	listOut   []domain.Issue // most recent list/filter result
-	history   []domain.LedgerEntry
-	viewOut   string
-	err       error
-	envBackup map[string]*string // original env values to restore in teardown
+	dir      string
+	cfg      config.Config
+	verify   *service.Service // second handle for reading ledger state
+	serveCtx context.Context
+	cancel   context.CancelFunc
+	serveCh  chan error // receives the serve command's exit error
+	subject  string
+	body     string
+	issue    domain.Issue
+	updated  domain.Issue   // issue as returned after an update
+	issues   []domain.Issue // issues created for list/filter scenarios
+	listOut  []domain.Issue // most recent list/filter result
+	history  []domain.LedgerEntry
+	viewOut  string
+	err      error
 
 	// transcript-capture (slice 6) state
 	sessionID   string
@@ -83,8 +82,6 @@ type world struct {
 	viewComment string
 }
 
-var managedEnvKeys = []string{"SUTRA_LISTEN", "SUTRA_DB", "SUTRA_HOST", "SUTRA_TOKEN", "SUTRA_PROJECTS_DIR"}
-
 func freeLoopbackAddr() (string, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -103,25 +100,17 @@ func (w *world) setup() error {
 	}
 	w.dir = dir
 
-	// Snapshot then override the environment so config.Load is exercised and
-	// prior values are restored in teardown (no cross-test order dependence).
-	w.envBackup = make(map[string]*string, len(managedEnvKeys))
-	for _, k := range managedEnvKeys {
-		if v, ok := os.LookupEnv(k); ok {
-			vv := v
-			w.envBackup[k] = &vv
-		} else {
-			w.envBackup[k] = nil
-		}
+	// Build the scenario config directly. config.Load reads the TOML file at
+	// ~/.config/sutra/config.toml; the BDD harness injects values via the struct
+	// so serve/runCLI exercise the real command surface without touching the
+	// user's config. Bearer auth is on for the whole suite so every scenario runs
+	// the authenticated path (slice 2); transcript ingest/discover is confined to
+	// the scenario temp dir where session fixtures are written.
+	base := config.Config{
+		DBPath:      filepath.Join(dir, "test.db"),
+		Token:       "test-secret-token",
+		ProjectsDir: dir,
 	}
-	os.Setenv("SUTRA_DB", filepath.Join(dir, "test.db"))
-	// Run the whole suite with bearer auth enabled: the daemon enforces it and
-	// the client (config.Load) sends it, so every scenario exercises the
-	// authenticated path (slice 2).
-	os.Setenv("SUTRA_TOKEN", "test-secret-token")
-	// Transcript ingest/discover is confined to the projects dir; point it at the
-	// scenario temp dir where session fixtures are written.
-	os.Setenv("SUTRA_PROJECTS_DIR", dir)
 
 	// Start the daemon via the real Cobra `serve` command, retrying to tolerate
 	// the rare race where the chosen ephemeral port is claimed by another
@@ -132,9 +121,9 @@ func (w *world) setup() error {
 		if err != nil {
 			return err
 		}
-		os.Setenv("SUTRA_LISTEN", addr)
-		os.Setenv("SUTRA_HOST", "http://"+addr)
-		w.cfg = config.Load()
+		w.cfg = base
+		w.cfg.ListenAddr = addr
+		w.cfg.Host = "http://" + addr
 
 		ctx, cancel := context.WithCancel(context.Background())
 		ch := make(chan error, 1)
@@ -192,14 +181,6 @@ func waitListening(addr string, ch chan error) (exited bool, err error) {
 }
 
 func (w *world) teardown() error {
-	for k, v := range w.envBackup {
-		if v == nil {
-			os.Unsetenv(k)
-		} else {
-			os.Setenv(k, *v)
-		}
-	}
-
 	var errs []error
 	shutdownConfirmed := w.cancel == nil
 	if w.cancel != nil {

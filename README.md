@@ -42,15 +42,30 @@ Add `--json` to any CLI command to print the daemon's raw JSON response verbatim
 
 ## Configuration
 
-All configuration is via environment variables:
+Configuration is read from a TOML file at
+**`~/.config/sutra/config.toml`** (or `$XDG_CONFIG_HOME/sutra/config.toml`).
+A missing file uses the defaults below; any key you omit falls back to its
+default. An unknown key or malformed file is a startup error.
 
-| Variable             | Default                     | Purpose                                                    |
-| -------------------- | --------------------------- | ---------------------------------------------------------- |
-| `SUTRA_LISTEN`       | `127.0.0.1:8422`            | Daemon bind address (`serve`)                              |
-| `SUTRA_HOST`         | `http://127.0.0.1:8422`     | Endpoint the CLI/TUI target                                |
-| `SUTRA_TOKEN`        | *(unset)*                   | Bearer token; required to bind a non-loopback address      |
-| `SUTRA_DB`           | `~/.sutra/sutra.db`         | SQLite database file                                       |
-| `SUTRA_PROJECTS_DIR` | `~/.claude/projects`        | Directory transcript ingest/discover is confined to        |
+```toml
+# ~/.config/sutra/config.toml
+listen_addr  = "127.0.0.1:8422"       # daemon bind address (serve)
+host         = "http://127.0.0.1:8422" # endpoint the CLI/TUI target
+token        = ""                       # bearer token; required to bind non-loopback
+db_path      = "~/.sutra/sutra.db"      # SQLite database file
+projects_dir = "~/.claude/projects"     # dir transcript ingest/discover is confined to
+```
+
+| Key            | Default                     | Purpose                                                |
+| -------------- | --------------------------- | ------------------------------------------------------ |
+| `listen_addr`  | `127.0.0.1:8422`            | Daemon bind address (`serve`)                          |
+| `host`         | `http://127.0.0.1:8422`     | Endpoint the CLI/TUI target                            |
+| `token`        | *(empty)*                   | Bearer token; required to bind a non-loopback address  |
+| `db_path`      | `~/.sutra/sutra.db`         | SQLite database file                                   |
+| `projects_dir` | `~/.claude/projects`        | Directory transcript ingest/discover is confined to    |
+
+> The `token` is a secret in plaintext — keep the file private
+> (`chmod 600 ~/.config/sutra/config.toml`).
 
 ## Command reference
 
@@ -120,20 +135,21 @@ To reach the daemon from your other machines, bind a non-loopback address. A
 bearer token is **required** in that case — Sutra refuses to serve unauthenticated
 beyond loopback.
 
-On the server (e.g. the Ubuntu box):
+On the server (e.g. the Ubuntu box) — `~/.config/sutra/config.toml`:
 
-```bash
-export SUTRA_TOKEN="$(openssl rand -hex 32)"   # keep this secret
-SUTRA_LISTEN=0.0.0.0:8422 sutra serve
+```toml
+listen_addr = "0.0.0.0:8422"
+token       = "<a long random secret, e.g. from `openssl rand -hex 32`>"
 ```
 
-On each client machine:
+On each client machine — `~/.config/sutra/config.toml`:
 
-```bash
-export SUTRA_HOST="http://<server-ip>:8422"
-export SUTRA_TOKEN="<same token>"
-sutra list
+```toml
+host  = "http://<server-ip>:8422"
+token = "<same token>"
 ```
+
+Then `sutra serve` on the server and `sutra list` on a client.
 
 Auth is bearer-only over the wire; run it on a trusted network (there is no TLS
 termination built in — front it with a reverse proxy if you need HTTPS).

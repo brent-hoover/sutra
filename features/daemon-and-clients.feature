@@ -32,7 +32,7 @@ Feature: Daemon and clients
 
   @slice2
   Scenario: Use clients from another machine
-    Given SUTRA_HOST set to the daemon's LAN address and a valid token
+    Given a configured host set to the daemon's LAN address and a valid token
     When I run the CLI or TUI from another machine
     Then it operates against the daemon's data
 

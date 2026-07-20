@@ -59,5 +59,9 @@ func NewRoot(cfg config.Config) *cobra.Command {
 func Execute() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return NewRoot(config.Load()).ExecuteContext(ctx)
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	return NewRoot(cfg).ExecuteContext(ctx)
 }

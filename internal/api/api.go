@@ -80,7 +80,7 @@ func HandlerWithAuth(svc *service.Service, token string) http.Handler {
 
 // authMiddleware enforces bearer-token auth when token is non-empty. An empty
 // token (none configured) is a no-op, keeping localhost use friction-free; the
-// LAN deployment sets SUTRA_TOKEN to require it.
+// LAN deployment sets `token` in config.toml to require it.
 func authMiddleware(token string, next http.Handler) http.Handler {
 	if token == "" {
 		return next
@@ -113,7 +113,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// Never expose an unauthenticated daemon beyond loopback: require a token
 	// when binding to a non-loopback (LAN/all-interfaces) address.
 	if cfg.Token == "" && !isLoopbackAddr(cfg.ListenAddr) {
-		return fmt.Errorf("refusing to serve on non-loopback address %q without SUTRA_TOKEN set", cfg.ListenAddr)
+		return fmt.Errorf("refusing to serve on non-loopback address %q without a token set in config.toml", cfg.ListenAddr)
 	}
 
 	svc, err := service.New(cfg)

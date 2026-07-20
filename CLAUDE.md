@@ -71,6 +71,11 @@ SUTRA_BACKLOG=1 go test -run TestBacklog ./...
 
 ## Conventions & invariants
 
+- **Config is a TOML file**, not env vars. `config.Load()` reads
+  `$XDG_CONFIG_HOME/sutra/config.toml` (default `~/.config/sutra/config.toml`),
+  overlaying set keys onto defaults; a missing file uses defaults, an unknown key
+  or malformed file is a startup error. Keys: `listen_addr`, `host`, `token`,
+  `db_path`, `projects_dir`. (`SUTRA_BACKLOG` is a test-only toggle, unrelated.)
 - **Ledger on every mutation.** Every issue-changing operation writes an
   append-only `LedgerEntry` and bumps `updated_at`, in the same transaction.
   Ledger entries are never updated or deleted.
@@ -79,11 +84,11 @@ SUTRA_BACKLOG=1 go test -run TestBacklog ./...
   and hydrate labels/links via seams (`afterIssueReadHook`).
 - **Transcripts:** one entry per Claude `.jsonl` session, split into ordered
   `Message`s; `raw` (original JSON line) is kept as the lossless render source.
-  Ingest/discover is confined to `SUTRA_PROJECTS_DIR` — path traversal outside it
-  is rejected (TOCTOU-safe via pinned parent root).
+  Ingest/discover is confined to the configured `projects_dir` — path traversal
+  outside it is rejected (TOCTOU-safe via pinned parent root).
 - **Auth (LAN).** Bearer token; constant-time compare over SHA-256 digests;
   scheme is case-insensitive; the daemon refuses to bind a non-loopback address
-  without `SUTRA_TOKEN`. Server sets `ReadHeaderTimeout`/`IdleTimeout`.
+  without a `token` set in config. Server sets `ReadHeaderTimeout`/`IdleTimeout`.
 - **Terminal safety.** All daemon-provided strings are sanitized (`clean`/
   `cleanLine` in `cli`/`tui` `safe.go`) to strip ANSI/control sequences before
   display; TUI truncation is ANSI-display-width aware.
