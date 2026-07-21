@@ -9,6 +9,7 @@ import (
 
 	"github.com/brent-hoover/sutra/internal/client"
 	"github.com/brent-hoover/sutra/internal/config"
+	"github.com/brent-hoover/sutra/internal/domain"
 	"github.com/spf13/cobra"
 )
 
@@ -241,6 +242,9 @@ func outputView(cmd *cobra.Command, res client.IssueViewResult) error {
 	fmt.Fprintf(&b, "type:     %s\n", i.Type)
 	fmt.Fprintf(&b, "status:   %s\n", i.Status)
 	fmt.Fprintf(&b, "priority: %s\n", i.Priority)
+	if i.Type == domain.TypePlan && i.Approval != "" {
+		fmt.Fprintf(&b, "approval: %s\n", i.Approval)
+	}
 	if i.Owner != "" {
 		fmt.Fprintf(&b, "owner:    %s\n", cleanLine(i.Owner))
 	}

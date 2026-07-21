@@ -166,6 +166,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case planApprovedMsg:
+		if msg.gen != m.gen {
+			return m, nil // stale
+		}
+		m.err = msg.err
+		if msg.err == nil {
+			m.statusMsg = "approved " + msg.issue.ID
+			if m.detail != nil && m.detail.issue.ID == msg.issue.ID {
+				return m, m.loadDetailCmd(msg.issue.ID, m.gen) // re-fetch so approval shows
+			}
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}

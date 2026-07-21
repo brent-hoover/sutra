@@ -72,7 +72,13 @@ func planApproveCmd(cfg config.Config) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return outputLink(cmd, res)
+			if jsonOut, _ := cmd.Flags().GetBool("json"); jsonOut {
+				return printRawJSON(cmd.OutOrStdout(), res.Raw)
+			}
+			i := res.Issue
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s\t[%s/%s/%s]\t%s\n",
+				i.ID, i.Type, i.Status, i.Approval, cleanLine(i.Subject))
+			return err
 		},
 	}
 }

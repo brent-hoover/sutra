@@ -56,6 +56,21 @@ type commentAddedMsg struct {
 	err     error
 }
 
+type planApprovedMsg struct {
+	gen   int
+	issue domain.Issue
+	err   error
+}
+
+// approvePlanCmd approves a plan issue via the daemon.
+func (m *Model) approvePlanCmd(id string, gen int) tea.Cmd {
+	ctx, c := m.ctx, m.client
+	return func() tea.Msg {
+		res, err := c.ApprovePlan(ctx, id)
+		return planApprovedMsg{gen: gen, issue: res.Issue, err: err}
+	}
+}
+
 // loadIssuesCmd lists live issues.
 func (m *Model) loadIssuesCmd(gen int) tea.Cmd {
 	ctx, c := m.ctx, m.client
