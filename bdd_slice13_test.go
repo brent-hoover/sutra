@@ -122,6 +122,15 @@ func registerSlice13Steps(sc *godog.ScenarioContext, w *world) {
 		if len(c) != 3 {
 			return fmt.Errorf("expected 3 children, got %d", len(c))
 		}
+		// Assert the children match the tracer input in order, so a reordered or
+		// duplicated response can't pass just because the chain follows it.
+		wantSubject := []string{"one", "two", "three"}
+		wantBody := []string{"b1", "b2", "b3"}
+		for i := range c {
+			if c[i].Subject != wantSubject[i] || c[i].Body != wantBody[i] {
+				return fmt.Errorf("child %d = %q/%q, want %q/%q (tracer run order)", i, c[i].Subject, c[i].Body, wantSubject[i], wantBody[i])
+			}
+		}
 		v1, err := w.verify.GetIssueView(c[1].ID)
 		if err != nil {
 			return err
@@ -195,6 +204,15 @@ func registerSlice13Steps(sc *godog.ScenarioContext, w *world) {
 			return err
 		}
 		featureID = feat.ID
+		// Make it a genuine feature issue (create defaults to task) and confirm,
+		// so this fixture actually exercises the feature-parent path.
+		upd, err := w.updateIssue(featureID, "--type", "feature")
+		if err != nil {
+			return err
+		}
+		if upd.Type != domain.TypeFeature {
+			return fmt.Errorf("fixture type = %q, want feature", upd.Type)
+		}
 		return nil
 	})
 	sc.Step(`^I build a plan referencing that feature issue as parent$`, func() error {
@@ -258,17 +276,23 @@ func registerSlice13Steps(sc *godog.ScenarioContext, w *world) {
 		pendingSteps = `[]`
 		return nil
 	})
+	sc.Step(`^plan prose and tracer items where one has type plan$`, func() error {
+		pendingSteps = `[{"subject":"ok","body":"b"},{"subject":"nested","body":"b","type":"plan"}]`
+		return nil
+	})
 	sc.Step(`^I try to build the plan$`, func() error {
 		build("Bad plan", pendingSteps, "", "")
 		return nil
 	})
 	sc.Step(`^no plan issue and no child issues are created$`, func() error {
-		plans, err := w.verify.ListIssues(domain.IssueFilter{Type: domain.TypePlan})
+		// Assert the entire live issue set is empty — this catches a leaked plan
+		// issue AND any leaked (non-plan) tracer children.
+		all, err := w.verify.ListIssues(domain.IssueFilter{})
 		if err != nil {
 			return err
 		}
-		if len(plans) != 0 {
-			return fmt.Errorf("expected no plan issues, found %d", len(plans))
+		if len(all) != 0 {
+			return fmt.Errorf("expected no issues created, found %d", len(all))
 		}
 		return nil
 	})
@@ -365,6 +389,10 @@ func registerSlice13Steps(sc *godog.ScenarioContext, w *world) {
 		if iss.Approval != "" {
 			return fmt.Errorf("task approval = %q, want unchanged empty", iss.Approval)
 		}
+		return nil
+	})
+	sc.Step(`^I try to change its type to plan$`, func() error {
+		_, w.err = w.updateIssue(taskID, "--type", "plan")
 		return nil
 	})
 	sc.Step(`^no issue exists with the given id$`, func() error { return nil })

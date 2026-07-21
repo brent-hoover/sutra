@@ -174,9 +174,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		if msg.err == nil {
 			m.statusMsg = "approved " + msg.issue.ID
+			// Apply the returned issue immediately so the detail reflects the new
+			// approval without depending on a follow-up reload that could fail and
+			// leave a stale "pending" that still offers approval. Approval does not
+			// change the tracer children, so no re-fetch is needed.
 			if m.detail != nil && m.detail.issue.ID == msg.issue.ID {
-				return m, m.loadDetailCmd(msg.issue.ID, m.gen) // re-fetch so approval shows
+				m.detail.issue = msg.issue
+				m.setDetailContent()
 			}
+			m.replaceIssue(msg.issue) // keep the list cache current
 		}
 		return m, nil
 

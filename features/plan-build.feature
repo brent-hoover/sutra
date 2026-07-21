@@ -38,3 +38,7 @@ Feature: Building a plan as a ticket tree
     When I try to build the plan
     Then it is rejected
     And no plan issue and no child issues are created
+    Given plan prose and tracer items where one has type plan
+    When I try to build the plan
+    Then it is rejected
+    And no plan issue and no child issues are created

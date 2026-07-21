@@ -77,12 +77,18 @@ func registerSlice14Steps(sc *godog.ScenarioContext, w *world) {
 		if len(listOut) != 3 {
 			return fmt.Errorf("got %d children, want 3", len(listOut))
 		}
-		for i, c := range children {
-			if listOut[i].ID != c.ID {
-				return fmt.Errorf("position %d = %s, want %s (run order)", i, listOut[i].ID, c.ID)
+		// Assert the concrete subjects in run order (not merely that the response
+		// order matches the build response), and that every child is open.
+		wantSubject := []string{"one", "two", "three"}
+		for i := range wantSubject {
+			if listOut[i].ID != children[i].ID {
+				return fmt.Errorf("position %d = %s, want %s (run order)", i, listOut[i].ID, children[i].ID)
 			}
-			if listOut[i].Status == "" {
-				return fmt.Errorf("child %s has no status", listOut[i].ID)
+			if listOut[i].Subject != wantSubject[i] {
+				return fmt.Errorf("position %d subject = %q, want %q", i, listOut[i].Subject, wantSubject[i])
+			}
+			if listOut[i].Status != domain.StatusOpen {
+				return fmt.Errorf("position %d status = %q, want open", i, listOut[i].Status)
 			}
 		}
 		return nil
@@ -113,6 +119,12 @@ func registerSlice14Steps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^it is rejected as an invalid filter$`, func() error {
 		if w.err == nil {
 			return fmt.Errorf("expected an invalid-filter rejection, got none")
+		}
+		// Prove it was specifically a 400 rejecting the invalid status filter —
+		// not a transport error, 500, or malformed response.
+		msg := w.err.Error()
+		if !strings.Contains(msg, "400") || !strings.Contains(msg, "invalid status filter") {
+			return fmt.Errorf("error %q does not identify a 400 invalid-status-filter rejection", msg)
 		}
 		return nil
 	})

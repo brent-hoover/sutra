@@ -20,3 +20,6 @@ Feature: Approving a plan
     Given no issue exists with the given id
     When I try to approve that id as a plan
     Then it is rejected as not found
+    Given an issue of type task
+    When I try to change its type to plan
+    Then it is rejected

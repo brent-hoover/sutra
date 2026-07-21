@@ -129,13 +129,14 @@ func (m *Model) loadDetailCmd(id string, gen int) tea.Cmd {
 			return detailLoadedMsg{gen: gen, err: err}
 		}
 		d.transcripts = tr.Transcripts
-		// A plan issue also shows its tracer children, in run order.
+		// A plan issue also shows its tracer children, in run order. Loading them
+		// is best-effort: a child-list failure must not discard the successfully
+		// loaded detail (which would, on the post-approval path, drop the whole
+		// issue). The tracer section simply renders empty if the fetch fails.
 		if ir.Issue.Type == domain.TypePlan {
-			lr, err := c.ListIssues(ctx, map[string]string{"parent": id})
-			if err != nil {
-				return detailLoadedMsg{gen: gen, err: err}
+			if lr, err := c.ListIssues(ctx, map[string]string{"parent": id}); err == nil {
+				d.children = lr.Issues
 			}
-			d.children = lr.Issues
 		}
 		return detailLoadedMsg{gen: gen, detail: d}
 	}

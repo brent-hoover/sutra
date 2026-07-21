@@ -52,11 +52,16 @@ func TestApproveKeyIsNoopForNonPendingOrNonPlan(t *testing.T) {
 	}
 }
 
-func TestPlanApprovedMsgReloadsDetailAndSetsStatus(t *testing.T) {
+func TestPlanApprovedMsgAppliesIssueInPlace(t *testing.T) {
 	m := planDetailModel(domain.TypePlan, domain.ApprovalPending)
+	// The approved issue must be applied to the detail immediately — not left
+	// pending awaiting a reload that could fail.
 	_, cmd := m.Update(planApprovedMsg{gen: m.gen, issue: domain.Issue{ID: "p1", Type: domain.TypePlan, Approval: domain.ApprovalApproved}})
-	if cmd == nil {
-		t.Fatal("expected a detail-reload command after approval")
+	if cmd != nil {
+		t.Fatal("approval should apply in-place, not issue a follow-up reload command")
+	}
+	if got, _ := m.DetailIssue(); got.Approval != domain.ApprovalApproved {
+		t.Errorf("detail approval = %q, want approved (applied in place)", got.Approval)
 	}
 	if m.statusMsg != "approved p1" {
 		t.Errorf("status = %q, want %q", m.statusMsg, "approved p1")
