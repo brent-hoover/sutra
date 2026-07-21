@@ -78,8 +78,9 @@ func (s *Server) listIssues(w http.ResponseWriter, r *http.Request) {
 		Type:      domain.IssueType(q.Get("type")),
 		Priority:  domain.Priority(q.Get("priority")),
 		Owner:     q.Get("owner"),
-		Label:     q.Get("label"), // free-text; no enum validation
-		ProjectID: q.Get("project"),
+		Label:     q.Get("label"),   // free-text; no enum validation
+		ProjectID: q.Get("project"), // an id; no enum validation
+		ParentID:  q.Get("parent"),  // an id; no enum validation
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

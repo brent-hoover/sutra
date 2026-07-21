@@ -93,6 +93,7 @@ type IssueFilter struct {
 	Owner     string
 	Label     string // free-text label; matches issues carrying it in issue_label
 	ProjectID string // scope to a single project
+	ParentID  string // scope to a single parent (an issue's children, e.g. a plan's tracers)
 }
 
 // ErrInvalidIssue is returned when an issue fails validation.

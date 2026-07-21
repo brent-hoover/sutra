@@ -57,7 +57,7 @@ func viewCmd(cfg config.Config) *cobra.Command {
 }
 
 func listCmd(cfg config.Config) *cobra.Command {
-	var status, typ, priority, owner, label, project string
+	var status, typ, priority, owner, label, project, parent string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List issues (soft-deleted excluded)",
@@ -69,6 +69,7 @@ func listCmd(cfg config.Config) *cobra.Command {
 				"owner":    owner,
 				"label":    label,
 				"project":  project,
+				"parent":   parent,
 			}
 			res, err := client.New(cfg).ListIssues(cmd.Context(), filters)
 			if err != nil {
@@ -83,6 +84,7 @@ func listCmd(cfg config.Config) *cobra.Command {
 	cmd.Flags().StringVar(&owner, "owner", "", "filter by owner")
 	cmd.Flags().StringVar(&label, "label", "", "filter by label")
 	cmd.Flags().StringVar(&project, "project", "", "filter by project id")
+	cmd.Flags().StringVar(&parent, "parent", "", "filter by parent issue id (a plan's tracer children)")
 	return cmd
 }
 

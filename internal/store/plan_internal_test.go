@@ -188,6 +188,27 @@ func TestApprovePlanRejectsInvalidTargets(t *testing.T) {
 	}
 }
 
+func TestListByParentReturnsChildrenInOrder(t *testing.T) {
+	s := openStore(t)
+	plan, children := buildTestPlan(t, s, 3, nil, nil)
+
+	// A second, unrelated plan whose children must NOT leak into the first's list.
+	_, _ = buildTestPlan(t, s, 2, nil, nil)
+
+	got, err := s.ListIssues(domain.IssueFilter{ParentID: plan.ID})
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d children, want 3", len(got))
+	}
+	for i, c := range children {
+		if got[i].ID != c.ID {
+			t.Errorf("child %d = %s, want %s (run order)", i, got[i].ID, c.ID)
+		}
+	}
+}
+
 func strptr(s string) *string { return &s }
 
 // A plain issue created without an approval reads back with approval "" — the

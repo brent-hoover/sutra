@@ -218,6 +218,10 @@ func (s *Store) ListIssues(f domain.IssueFilter) ([]domain.Issue, error) {
 		q += " AND project_id = ?"
 		args = append(args, f.ProjectID)
 	}
+	if f.ParentID != "" {
+		q += " AND parent_id = ?"
+		args = append(args, f.ParentID)
+	}
 	q += " ORDER BY created_at, id"
 
 	// One read transaction for the row set and every issue's labels, so the

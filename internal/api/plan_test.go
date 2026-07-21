@@ -66,6 +66,38 @@ func TestBuildPlanEndpointRejections(t *testing.T) {
 	}
 }
 
+func TestListByParentEndpoint(t *testing.T) {
+	srv := newTestServer(t)
+	_, raw := postPlan(t, srv, `{"title":"t","prose":"p","steps":[{"subject":"a"},{"subject":"b"},{"subject":"c"}]}`)
+	var built struct {
+		Plan domain.Issue `json:"plan"`
+	}
+	if err := json.Unmarshal(raw, &built); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	resp, err := http.Get(srv.URL + "/issues?parent=" + built.Plan.ID)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d: %s", resp.StatusCode, body)
+	}
+	var children []domain.Issue
+	if err := json.Unmarshal(body, &children); err != nil {
+		t.Fatalf("decode children: %v", err)
+	}
+	if len(children) != 3 {
+		t.Errorf("children = %d, want 3", len(children))
+	}
+	for _, c := range children {
+		if c.ParentID == nil || *c.ParentID != built.Plan.ID {
+			t.Errorf("child %s parent = %v, want %s", c.ID, c.ParentID, built.Plan.ID)
+		}
+	}
+}
+
 func TestApprovePlanEndpoint(t *testing.T) {
 	srv := newTestServer(t)
 	_, raw := postPlan(t, srv, `{"title":"t","prose":"p","steps":[{"subject":"a"}]}`)
