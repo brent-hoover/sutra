@@ -15,8 +15,9 @@ const (
 	TypeTask    IssueType = "task"
 	TypeChore   IssueType = "chore"
 	// TypePlan is a plan issue: the parent of a set of tracer children, built
-	// from an approved plan. Its body holds the plan prose; it carries an
-	// Approval that gates its children.
+	// from a plan. Its body holds the plan prose; it carries an Approval that
+	// records human sign-off. Approval is advisory — it does not restrict listing
+	// or mutating the tracer children; agents are expected to honor it.
 	TypePlan IssueType = "plan"
 )
 

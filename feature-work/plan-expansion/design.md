@@ -74,11 +74,13 @@ traversal filter (@slice14).
     `issue_block` rows `(child[i].ID, child[i+1].ID)`; append a `created`
     `LedgerEntry` for the plan and each child. Rolls back on any failure, so a
     partial tree is never visible.
-    - **Run order is made deterministic here**: children are stamped with a
-      strictly-increasing `created_at` (child *i* gets `base + i`), so the existing
-      `ORDER BY created_at, id` in `ListIssues` returns them in tracer order
-      without a random `id` tiebreak. (Considered and rejected: an explicit
-      `position` column — narrower use, more schema; deriving order by walking the
+    - **Run order is made deterministic here** via a persisted `tracer_order`
+      integer column (added by `migrateTracerOrder`): `BuildPlan` stamps child *i*
+      with `tracer_order = i`, and `ListIssues` orders parent-filtered results by
+      `tracer_order` first. This avoids relying on `created_at` string ordering
+      (RFC3339Nano has variable-width fractional seconds, so a lexicographic sort
+      can misorder strictly-increasing timestamps) and preserves the caller's
+      timestamps. (Considered and rejected: deriving order by walking the
       `issue_block` chain in the list path — couples `list` to blocking.)
   - `ApprovePlan(id string, entry domain.LedgerEntry) (domain.Issue, error)` — one
     transaction: load the issue (`ErrNotFound` if absent); reject if

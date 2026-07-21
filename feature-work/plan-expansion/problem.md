@@ -134,16 +134,16 @@ no way to derive structured steps from that prose.
 
 - [ ] **Approval vocabulary.** `pending` / `approved` is the working choice;
   confirm against any existing status vocabulary in the docs during design.
-- [ ] **How approval coexists with `status`.** Is approval a **new field** on the
-  issue (distinct from the `open|in_progress|closed` status), a **new status enum
-  value**, or something else? A design-level modeling decision.
-- [ ] **How approval is recorded in the ledger.** `LedgerEntry.kind` is a closed
-  enum with no approval kind. Does approval extend the enum (e.g. `approved`), ride
-  on `status_changed`, or use `updated`? Resolve in design.
-- [ ] **Does approval _enforce_ anything, or is it advisory?** Leaning advisory —
-  Sutra is a passive tracker and should not block child mutations before approval;
-  approval is a recorded human signal the agent is expected to honor. Confirm in
-  design.
+- [x] **How approval coexists with `status`** — resolved: a distinct `approval`
+  field on the issue (not a new `status` value).
+- [x] **How approval is recorded in the ledger** — resolved: rides on the existing
+  `updated` kind with `field="approval"`; the closed `LedgerEntry.kind` enum is
+  unchanged.
+- [x] **Does approval enforce anything, or is it advisory?** — resolved:
+  **advisory**. Sutra is a passive tracker; approval does not block listing or
+  mutating the tracer children. It is a recorded human signal the agent is
+  expected to honor. (Type transitions to/from `plan` via generic update *are*
+  rejected, but that is a type-integrity guard, not approval gating.)
 
 ## Change log
 

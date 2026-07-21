@@ -71,15 +71,17 @@ idempotent. Exit 0.
 
 **What:** new `internal/store/plan.go`: `BuildPlan` (one tx — resolve parent
 existence + project inheritance in-tx, validate explicit `project_id`, reject a
-parent/project mismatch, insert plan then children with strictly-increasing
-`created_at`, `issue_block` chain, `created` ledger per issue) and `ApprovePlan`
+parent/project mismatch, insert plan then children stamping a persisted
+`tracer_order` integer per child (via `migrateTracerOrder`; `ListIssues` orders
+parent-filtered results by it, preserving caller timestamps), `issue_block` chain,
+`created` ledger per issue) and `ApprovePlan`
 (one tx — `ErrNotFound`/non-plan `ErrInvalidIssue`, idempotent when already
 approved, else set `approval`, bump `updated_at`, `updated`/`approval` ledger).
 
 **Why:** atomic persistence and the approval transition.
 
 **Verify:** `go test ./internal/store/` — new `plan_test.go` covers build atomicity
-(rollback on bad child leaves nothing), monotonic order, project inheritance,
+(rollback on bad child leaves nothing), `tracer_order` run order, project inheritance,
 missing project rejection, parent/project conflict rejection, approve idempotency,
 and non-plan rejection. Exit 0.
 
@@ -161,8 +163,8 @@ press the approve key, see it flip to `approved`.
 
 **What:** add `ParentID string` to `domain.IssueFilter`; apply it in
 `store.ListIssues` (`AND parent_id = ?`), mirroring the existing `ProjectID`
-clause. Children already return in `created_at, id` order (Step 3 made that tracer
-order).
+clause, and order parent-filtered results by `tracer_order` (Step 3 persists it),
+so children return in tracer run order.
 
 **Why:** enumerate a plan's children.
 
