@@ -315,6 +315,54 @@ func TestListByParentReturnsChildrenInOrder(t *testing.T) {
 	}
 }
 
+func TestListByParentUsesTracerOrderAcrossFractionalPrecision(t *testing.T) {
+	s := openStore(t)
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	earlier, err := time.Parse(time.RFC3339Nano, "2026-01-02T03:04:05.12345679Z")
+	if err != nil {
+		t.Fatalf("parse earlier: %v", err)
+	}
+	later, err := time.Parse(time.RFC3339Nano, "2026-01-02T03:04:05.123456791Z")
+	if err != nil {
+		t.Fatalf("parse later: %v", err)
+	}
+	plan := domain.Issue{
+		ID: domain.NewID(), Subject: "p", Body: "b", Type: domain.TypePlan,
+		Status: domain.StatusOpen, Priority: domain.P2, Approval: domain.ApprovalPending,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	children := []domain.Issue{
+		{
+			ID: domain.NewID(), Subject: "earlier", Body: "b", Type: domain.TypeTask,
+			Status: domain.StatusOpen, Priority: domain.P2, ParentID: &plan.ID,
+			CreatedAt: earlier, UpdatedAt: earlier,
+		},
+		{
+			ID: domain.NewID(), Subject: "later", Body: "b", Type: domain.TypeTask,
+			Status: domain.StatusOpen, Priority: domain.P2, ParentID: &plan.ID,
+			CreatedAt: later, UpdatedAt: later,
+		},
+	}
+	ledger := []domain.LedgerEntry{{ID: domain.NewID(), IssueID: plan.ID, At: now, Kind: domain.LedgerCreated}}
+	for _, child := range children {
+		ledger = append(ledger, domain.LedgerEntry{ID: domain.NewID(), IssueID: child.ID, At: child.CreatedAt, Kind: domain.LedgerCreated})
+	}
+	if err := s.BuildPlan(plan, children, ledger); err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	got, err := s.ListIssues(domain.IssueFilter{ParentID: plan.ID})
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d children, want 2", len(got))
+	}
+	if got[0].ID != children[0].ID || got[1].ID != children[1].ID {
+		t.Fatalf("children order = [%s %s], want [%s %s]", got[0].ID, got[1].ID, children[0].ID, children[1].ID)
+	}
+}
+
 func TestSetParentClearsTracerOrder(t *testing.T) {
 	s := openStore(t)
 	_, children := buildTestPlan(t, s, 1, nil, nil)
