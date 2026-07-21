@@ -11,8 +11,8 @@ design: ./design.md
 
 **Objective (one sentence):** Let an agent build a feature's plan directly as a
 tracked ticket tree — a first-class `plan` issue (carrying a `pending→approved`
-approval gate) plus one ordered, sequentially-blocked tracer child per step — and
-let that tree be enumerated and worked to completion.
+advisory approval checkpoint) plus one ordered, sequentially-blocked tracer child
+per step — and let that tree be enumerated and worked to completion.
 
 Delivered as two slices:
 
