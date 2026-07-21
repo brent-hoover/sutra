@@ -315,6 +315,50 @@ func TestListByParentReturnsChildrenInOrder(t *testing.T) {
 	}
 }
 
+func TestSetParentClearsTracerOrder(t *testing.T) {
+	s := openStore(t)
+	_, children := buildTestPlan(t, s, 1, nil, nil)
+
+	now := time.Now().UTC()
+	parent := domain.Issue{
+		ID: domain.NewID(), Subject: "new parent", Body: "b",
+		Type: domain.TypeFeature, Status: domain.StatusOpen, Priority: domain.P2,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.CreateIssue(parent, []domain.LedgerEntry{{ID: domain.NewID(), IssueID: parent.ID, At: now, Kind: domain.LedgerCreated}}); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	older := now.Add(-time.Hour)
+	ordinary := domain.Issue{
+		ID: domain.NewID(), Subject: "ordinary child", Body: "b",
+		Type: domain.TypeTask, Status: domain.StatusOpen, Priority: domain.P2,
+		ParentID: &parent.ID, CreatedAt: older, UpdatedAt: older,
+	}
+	if err := s.CreateIssue(ordinary, []domain.LedgerEntry{{ID: domain.NewID(), IssueID: ordinary.ID, At: older, Kind: domain.LedgerCreated}}); err != nil {
+		t.Fatalf("create ordinary child: %v", err)
+	}
+
+	_, err := s.SetParent(children[0].ID, parent.ID, domain.LedgerEntry{
+		ID: domain.NewID(), IssueID: children[0].ID, Kind: domain.LedgerLinked,
+		Field: "parent_id", NewValue: parent.ID,
+	})
+	if err != nil {
+		t.Fatalf("set parent: %v", err)
+	}
+
+	got, err := s.ListIssues(domain.IssueFilter{ParentID: parent.ID})
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d children, want 2", len(got))
+	}
+	if got[0].ID != ordinary.ID || got[1].ID != children[0].ID {
+		t.Fatalf("children order = [%s %s], want [%s %s]", got[0].ID, got[1].ID, ordinary.ID, children[0].ID)
+	}
+}
+
 func strptr(s string) *string { return &s }
 
 // A plain issue created without an approval reads back with approval "" — the

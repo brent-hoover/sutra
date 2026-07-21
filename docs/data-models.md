@@ -54,8 +54,9 @@ them. Timestamps are UTC. IDs are short stable identifiers (kata-style).
   - A `plan` issue and its tracer children are created atomically (see
     `store.BuildPlan`): the plan, one child per tracer item, a sequential
     `issue_block` chain (child *i* blocks *i+1*), and a `created` ledger entry
-    per new issue — all in one transaction. Children are stamped with a
-    strictly-increasing `created_at` so `list` returns them in run order.
+    per new issue — all in one transaction. Child run order is stored in
+    `tracer_order`; `created_at` and `updated_at` preserve the caller's
+    timestamps.
   - The issue **type** `plan` is a distinct axis from the document **kind**
     `plan` (`problem|design|plan|scenarios`); they are unrelated.
 
