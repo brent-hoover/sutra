@@ -20,15 +20,22 @@ func (s *Store) migrateApproval() error {
 	return nil
 }
 
+func (s *Store) migrateTracerOrder() error {
+	if err := s.addColumnIfMissing("issues", "tracer_order", "INTEGER"); err != nil {
+		return fmt.Errorf("migrate issues tracer_order: %w", err)
+	}
+	return nil
+}
+
 // BuildPlan inserts the plan issue, its tracer children, and the sequential
 // blocking chain (child i blocks child i+1) in one transaction, along with the
 // supplied ledger entries. If plan.ParentID is set it must exist; the plan's
 // project is inherited from that parent when plan.ProjectID is nil, and the
-// resolved project is stamped on the plan and every child. Child order comes from
-// the slice order: BuildPlan stamps sortable child timestamps before persisting
-// so ListIssues returns tracers in run order. Any failure rolls the whole tree
-// back, so a partial plan is never visible. The caller is responsible for setting
-// each child's ParentID to the plan's id.
+// resolved project is stamped on the plan and every child. Child order comes
+// from the slice order: BuildPlan persists a tracer ordinal so ListIssues returns
+// tracers in run order without altering timestamps. Any failure rolls the whole
+// tree back, so a partial plan is never visible. The caller is responsible for
+// setting each child's ParentID to the plan's id.
 func (s *Store) BuildPlan(plan domain.Issue, children []domain.Issue, ledger []domain.LedgerEntry) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -64,14 +71,13 @@ func (s *Store) BuildPlan(plan domain.Issue, children []domain.Issue, ledger []d
 	if err := insertIssueTx(tx, plan); err != nil {
 		return err
 	}
-	childBase := plan.CreatedAt.UTC().Truncate(time.Second)
 	for i := range children {
-		childAt := childBase.Add(time.Duration(i+1) * time.Second)
-		children[i].CreatedAt = childAt
-		children[i].UpdatedAt = childAt
 		children[i].ProjectID = plan.ProjectID
 		if err := insertIssueTx(tx, children[i]); err != nil {
 			return err
+		}
+		if _, err := tx.Exec(`UPDATE issues SET tracer_order = ? WHERE id = ?`, i, children[i].ID); err != nil {
+			return fmt.Errorf("set tracer order: %w", err)
 		}
 	}
 	for i := 0; i+1 < len(children); i++ {

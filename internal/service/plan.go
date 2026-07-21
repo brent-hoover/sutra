@@ -61,9 +61,6 @@ func (s *Service) BuildPlan(title, prose string, steps []PlanStep, parentID, pro
 
 	children := make([]domain.Issue, len(steps))
 	for i, step := range steps {
-		// Strictly-increasing created_at gives the children a deterministic run
-		// order under ListIssues' `ORDER BY created_at, id`.
-		at := now.Add(time.Duration(i + 1))
 		typ := step.Type
 		if typ == "" {
 			typ = domain.TypeTask
@@ -79,9 +76,9 @@ func (s *Service) BuildPlan(title, prose string, steps []PlanStep, parentID, pro
 		children[i] = domain.Issue{
 			ID: domain.NewID(), Subject: step.Subject, Body: body,
 			Type: typ, Status: domain.StatusOpen, Priority: pri,
-			ParentID: &plan.ID, CreatedAt: at, UpdatedAt: at,
+			ParentID: &plan.ID, CreatedAt: now, UpdatedAt: now,
 		}
-		ledger = append(ledger, domain.LedgerEntry{ID: domain.NewID(), IssueID: children[i].ID, At: at, Kind: domain.LedgerCreated})
+		ledger = append(ledger, domain.LedgerEntry{ID: domain.NewID(), IssueID: children[i].ID, At: now, Kind: domain.LedgerCreated})
 	}
 
 	if err := s.store.BuildPlan(plan, children, ledger); err != nil {

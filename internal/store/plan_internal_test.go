@@ -49,8 +49,7 @@ func TestBuildPlanCreatesChainedTreeInOrder(t *testing.T) {
 	if got.Type != domain.TypePlan || got.Approval != domain.ApprovalPending {
 		t.Fatalf("plan type/approval = %q/%q", got.Type, got.Approval)
 	}
-	// Each child parents the plan; BuildPlan stamps created_at in run order.
-	var last time.Time
+	// Each child parents the plan; BuildPlan preserves caller timestamps.
 	for i, c := range children {
 		cv, err := s.GetIssue(c.ID)
 		if err != nil {
@@ -59,10 +58,12 @@ func TestBuildPlanCreatesChainedTreeInOrder(t *testing.T) {
 		if cv.ParentID == nil || *cv.ParentID != plan.ID {
 			t.Errorf("child %d parent = %v, want %s", i, cv.ParentID, plan.ID)
 		}
-		if i > 0 && !cv.CreatedAt.After(last) {
-			t.Errorf("child %d created_at %v not after previous %v", i, cv.CreatedAt, last)
+		if !cv.CreatedAt.Equal(c.CreatedAt) {
+			t.Errorf("child %d created_at = %v, want %v", i, cv.CreatedAt, c.CreatedAt)
 		}
-		last = cv.CreatedAt
+		if !cv.UpdatedAt.Equal(c.UpdatedAt) {
+			t.Errorf("child %d updated_at = %v, want %v", i, cv.UpdatedAt, c.UpdatedAt)
+		}
 	}
 	// Chain: child1 blocked by child0, child2 blocked by child1.
 	v1, _ := s.GetIssueView(children[1].ID)

@@ -222,7 +222,11 @@ func (s *Store) ListIssues(f domain.IssueFilter) ([]domain.Issue, error) {
 		q += " AND parent_id = ?"
 		args = append(args, f.ParentID)
 	}
-	q += " ORDER BY created_at, id"
+	if f.ParentID != "" {
+		q += " ORDER BY tracer_order IS NULL, tracer_order, created_at, id"
+	} else {
+		q += " ORDER BY created_at, id"
+	}
 
 	// One read transaction for the row set and every issue's labels, so the
 	// list is a consistent snapshot: a concurrent label mutation can't make a
