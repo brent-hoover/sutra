@@ -132,8 +132,8 @@ no way to derive structured steps from that prose.
 
 ## Open questions
 
-- [ ] **Approval vocabulary.** `pending` / `approved` is the working choice;
-  confirm against any existing status vocabulary in the docs during design.
+- [x] **Approval vocabulary** — resolved: `pending` / `approved` (the values the
+  implementation uses).
 - [x] **How approval coexists with `status`** — resolved: a distinct `approval`
   field on the issue (not a new `status` value).
 - [x] **How approval is recorded in the ledger** — resolved: rides on the existing

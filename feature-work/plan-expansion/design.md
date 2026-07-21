@@ -17,7 +17,8 @@ as a ticket tree in one call: a `plan` issue (its body holds the plan prose,
 carrying an `approval` field that starts `pending`), one child issue per tracer
 item, and a sequential `issue_block` chain so tracer *N* blocks *N+1* — all in one
 store transaction with a `created` ledger entry per new issue. A human approves
-the plan issue (`pending → approved`, one-way) as the gate. A new `parent_id`
+the plan issue (`pending → approved`, one-way) as a workflow sign-off — advisory,
+not an application-enforced gate on child operations. A new `parent_id`
 filter on `list` makes the tree enumerable so an agent can work it to completion,
 marking each tracer `closed`. Everything reuses existing mechanisms
 (`issue_block`, the ledger, `IssueFilter`); no new cross-module import.
@@ -88,8 +89,9 @@ traversal filter (@slice14).
     (no ledger, return as-is); else set `approval = approved`, bump `updated_at`,
     append the `updated`/`approval` ledger entry.
 - `internal/store/issues.go` (@slice14): apply `f.ParentID` in `ListIssues`
-  (`AND parent_id = ?`), mirroring the existing `ProjectID` clause. Children come
-  back in `created_at, id` order — i.e. tracer order — which is the run order.
+  (`AND parent_id = ?`), mirroring the existing `ProjectID` clause. When filtering
+  by parent, order by `tracer_order` first (then `created_at, id` as a fallback for
+  rows with a null ordinal), so children come back in tracer run order.
 
 **Service (`internal/service/plan.go`, new).**
 - `type PlanStep struct { Subject, Body string; Type domain.IssueType; Priority domain.Priority }`.
@@ -154,8 +156,13 @@ human can see the tree they are approving. `build` is **not** surfaced in the TU
 - `plan` is not a generic issue type transition: only `BuildPlan` creates a
   `plan`, and generic updates reject both `task|bug|feature|chore → plan` and
   `plan → task|bug|feature|chore`.
-- No new tables. Ordering reuses `issue_block`; grouping reuses `parent_id`;
-  the epic↔feature link reuses `parent_id` (plan issue's own parent).
+- `issues.tracer_order INTEGER` (nullable; added by `migrateTracerOrder`) — the
+  tracer child's position within its plan; null for every non-tracer issue.
+  Parent-filtered `ListIssues` orders by it (null ordinals fall back to
+  `created_at, id`).
+- No new tables. Run order uses the `tracer_order` column; grouping reuses
+  `parent_id`; the dependency chain reuses `issue_block` (blocking edges, not a
+  sort key); the plan↔feature link reuses `parent_id` (plan issue's own parent).
 - `LedgerEntry.kind` is unchanged (closed enum); approval rides on `updated` with
   `field="approval"`.
 
@@ -174,8 +181,8 @@ exactly the drift the problem statement rejects.
 A `plan` issue type + `approval` field + a single atomic `BuildPlan` store call +
 `ApprovePlan` + a `parent_id` list filter. Reuses `issue_block`, the ledger, and
 `IssueFilter`; adds no table and no cross-module import. Handles the complexity
-drivers (atomicity, malformed-input rejection, approval gate) without new
-mechanism beyond one column.
+drivers (atomicity, malformed-input rejection, an advisory approval checkpoint)
+without new mechanism beyond one column.
 
 ### Optimal
 
@@ -186,8 +193,8 @@ features (resolutions already logged as a follow-up). Not needed for the agent
 loop now.
 
 **Decision:** Complete. Scale/concurrency don't push past it; the failure-mode and
-approval-gate drivers push above Simplest; the resolution/rollup ambitions are
-deferred, keeping us below Optimal.
+approval-checkpoint drivers push above Simplest; the resolution/rollup ambitions
+are deferred, keeping us below Optimal.
 
 ## Risks
 
