@@ -40,6 +40,13 @@ func TestPlanBuildRejectsBothStdin(t *testing.T) {
 	}
 }
 
+func TestDecodePlanStepsRejectsUnknownFields(t *testing.T) {
+	_, err := decodePlanSteps(`[{"subject":"first","prioriy":"p0"}]`)
+	if err == nil || !strings.Contains(err.Error(), `unknown field "prioriy"`) {
+		t.Errorf("err = %v, want unknown field error", err)
+	}
+}
+
 func TestOutputPlanFormatting(t *testing.T) {
 	cmd := &cobra.Command{}
 	var buf bytes.Buffer
@@ -56,6 +63,24 @@ func TestOutputPlanFormatting(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{"plan1", "pending", "c1", "c2", "chain: c1 → c2"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestOutputPlanApprovalIncludesApproval(t *testing.T) {
+	cmd := &cobra.Command{}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	res := client.IssueResult{
+		Issue: domain.Issue{ID: "plan1", Subject: "Search", Type: domain.TypePlan, Status: domain.StatusOpen, Approval: domain.ApprovalApproved},
+	}
+	if err := outputPlanApproval(cmd, res); err != nil {
+		t.Fatalf("outputPlanApproval: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"plan1", "[plan/open/approved]", "Search"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

@@ -41,7 +41,8 @@ func planBuildCmd(cfg config.Config) *cobra.Command {
 				return fmt.Errorf("read steps: %w", err)
 			}
 			var stepList []client.PlanStepInput
-			if err := json.Unmarshal([]byte(stepsRaw), &stepList); err != nil {
+			stepList, err = decodePlanSteps(stepsRaw)
+			if err != nil {
 				return fmt.Errorf("parse steps JSON: %w", err)
 			}
 			res, err := client.New(cfg).BuildPlan(cmd.Context(), title, proseText, stepList, parent, project)
@@ -72,15 +73,26 @@ func planApproveCmd(cfg config.Config) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if jsonOut, _ := cmd.Flags().GetBool("json"); jsonOut {
-				return printRawJSON(cmd.OutOrStdout(), res.Raw)
-			}
-			i := res.Issue
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s\t[%s/%s/%s]\t%s\n",
-				i.ID, i.Type, i.Status, i.Approval, cleanLine(i.Subject))
-			return err
+			return outputPlanApproval(cmd, res)
 		},
 	}
+}
+
+func decodePlanSteps(raw string) ([]client.PlanStepInput, error) {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var steps []client.PlanStepInput
+	if err := dec.Decode(&steps); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("unexpected trailing JSON")
+		}
+		return nil, err
+	}
+	return steps, nil
 }
 
 // readSource returns the contents of spec: stdin when spec is "-", otherwise the
@@ -112,5 +124,15 @@ func outputPlan(cmd *cobra.Command, res client.PlanResult) error {
 		fmt.Fprintf(&b, "chain: %s\n", strings.Join(ids, " → "))
 	}
 	_, err := io.WriteString(cmd.OutOrStdout(), b.String())
+	return err
+}
+
+func outputPlanApproval(cmd *cobra.Command, res client.IssueResult) error {
+	if jsonOut, _ := cmd.Flags().GetBool("json"); jsonOut {
+		return printRawJSON(cmd.OutOrStdout(), res.Raw)
+	}
+	i := res.Issue
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t[%s/%s/%s]\t%s\n",
+		i.ID, i.Type, i.Status, i.Approval, cleanLine(i.Subject))
 	return err
 }
