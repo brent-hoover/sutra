@@ -132,7 +132,8 @@ func (m *Model) loadDetailCmd(id string, gen int) tea.Cmd {
 		// A plan issue also shows its tracer children, in run order. Loading them
 		// is best-effort: a child-list failure must not discard the successfully
 		// loaded detail (which would, on the post-approval path, drop the whole
-		// issue). The tracer section simply renders empty if the fetch fails.
+		// issue). Instead the failure is recorded on childErr and the tracer
+		// section reports it as "unavailable" (distinct from a childless plan).
 		if ir.Issue.Type == domain.TypePlan {
 			if lr, err := c.ListIssues(ctx, map[string]string{"parent": id}); err == nil {
 				d.children = lr.Issues
