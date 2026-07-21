@@ -95,7 +95,7 @@ func (s *Store) SetParent(childID, parentID string, entry domain.LedgerEntry) (d
 
 	now := time.Now().UTC()
 	if _, err := tx.Exec(
-		`UPDATE issues SET parent_id = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE issues SET parent_id = ?, tracer_order = NULL, updated_at = ? WHERE id = ?`,
 		parentID, now.Format(timeFmt), childID,
 	); err != nil {
 		return domain.Issue{}, fmt.Errorf("set parent: %w", err)

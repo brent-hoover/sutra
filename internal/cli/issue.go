@@ -9,6 +9,7 @@ import (
 
 	"github.com/brent-hoover/sutra/internal/client"
 	"github.com/brent-hoover/sutra/internal/config"
+	"github.com/brent-hoover/sutra/internal/domain"
 	"github.com/spf13/cobra"
 )
 
@@ -56,7 +57,7 @@ func viewCmd(cfg config.Config) *cobra.Command {
 }
 
 func listCmd(cfg config.Config) *cobra.Command {
-	var status, typ, priority, owner, label, project string
+	var status, typ, priority, owner, label, project, parent string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List issues (soft-deleted excluded)",
@@ -68,6 +69,7 @@ func listCmd(cfg config.Config) *cobra.Command {
 				"owner":    owner,
 				"label":    label,
 				"project":  project,
+				"parent":   parent,
 			}
 			res, err := client.New(cfg).ListIssues(cmd.Context(), filters)
 			if err != nil {
@@ -82,6 +84,7 @@ func listCmd(cfg config.Config) *cobra.Command {
 	cmd.Flags().StringVar(&owner, "owner", "", "filter by owner")
 	cmd.Flags().StringVar(&label, "label", "", "filter by label")
 	cmd.Flags().StringVar(&project, "project", "", "filter by project id")
+	cmd.Flags().StringVar(&parent, "parent", "", "filter by parent issue id (a plan's tracer children)")
 	return cmd
 }
 
@@ -241,6 +244,9 @@ func outputView(cmd *cobra.Command, res client.IssueViewResult) error {
 	fmt.Fprintf(&b, "type:     %s\n", i.Type)
 	fmt.Fprintf(&b, "status:   %s\n", i.Status)
 	fmt.Fprintf(&b, "priority: %s\n", i.Priority)
+	if i.Type == domain.TypePlan && i.Approval != "" {
+		fmt.Fprintf(&b, "approval: %s\n", i.Approval)
+	}
 	if i.Owner != "" {
 		fmt.Fprintf(&b, "owner:    %s\n", cleanLine(i.Owner))
 	}

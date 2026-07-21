@@ -54,6 +54,7 @@ func NewRoot(cfg config.Config) *cobra.Command {
 		projectCmd(cfg),
 		threadCmd(cfg),
 		skillCmd(cfg),
+		planCmd(cfg),
 	)
 	return root
 }

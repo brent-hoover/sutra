@@ -150,6 +150,9 @@ func (s *Service) UpdateIssue(id string, upd IssueUpdate) (domain.Issue, error) 
 		}
 
 		if upd.Type != nil && *upd.Type != issue.Type {
+			if *upd.Type == domain.TypePlan || issue.Type == domain.TypePlan {
+				return nil, errors.Join(domain.ErrInvalidIssue, errors.New("plan type changes must use plan APIs"))
+			}
 			old := string(issue.Type)
 			issue.Type = *upd.Type
 			record(domain.LedgerUpdated, "type", old, string(issue.Type))

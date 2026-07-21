@@ -857,6 +857,8 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	registerSlice10Steps(sc, w)
 	registerSlice11Steps(sc, w)
 	registerSlice12Steps(sc, w)
+	registerSlice13Steps(sc, w)
+	registerSlice14Steps(sc, w)
 }
 
 // registerSlice7Steps wires the step definitions for the @slice7 scenarios:

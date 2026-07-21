@@ -25,6 +25,8 @@ type issueDetail struct {
 	documents   []domain.Document
 	transcripts []domain.Transcript
 	comments    []domain.Comment
+	children    []domain.Issue // tracer children, for a plan issue
+	childErr    error          // set when the tracer-children load failed (best-effort)
 }
 
 // Model is the Bubble Tea model for the Sutra TUI. It talks to the daemon
@@ -166,6 +168,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case planApprovedMsg:
+		if msg.gen != m.gen {
+			return m, nil // stale
+		}
+		m.err = msg.err
+		if msg.err == nil {
+			m.statusMsg = "approved " + msg.issue.ID
+			// Apply the returned issue immediately so the detail reflects the new
+			// approval without depending on a follow-up reload that could fail and
+			// leave a stale "pending" that still offers approval. Approval does not
+			// change the tracer children, so no re-fetch is needed.
+			if m.detail != nil && m.detail.issue.ID == msg.issue.ID {
+				m.detail.issue = msg.issue
+				m.setDetailContent()
+			}
+			m.replaceIssue(msg.issue) // keep the list cache current
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -303,4 +324,12 @@ func (m *Model) DetailComments() []domain.Comment {
 		return nil
 	}
 	return m.detail.comments
+}
+
+// DetailChildren returns the tracer children shown for a plan issue's detail.
+func (m *Model) DetailChildren() []domain.Issue {
+	if m.detail == nil {
+		return nil
+	}
+	return m.detail.children
 }

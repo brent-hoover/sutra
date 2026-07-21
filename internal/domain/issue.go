@@ -14,6 +14,20 @@ const (
 	TypeBug     IssueType = "bug"
 	TypeTask    IssueType = "task"
 	TypeChore   IssueType = "chore"
+	// TypePlan is a plan issue: the parent of a set of tracer children, built
+	// from a plan. Its body holds the plan prose; it carries an Approval that
+	// records human sign-off. Approval is advisory — it does not restrict listing
+	// or mutating the tracer children; agents are expected to honor it.
+	TypePlan IssueType = "plan"
+)
+
+// Approval is the sign-off state of a plan issue. It is empty for non-plan
+// issues and moves one-way from Pending to Approved.
+type Approval string
+
+const (
+	ApprovalPending  Approval = "pending"
+	ApprovalApproved Approval = "approved"
 )
 
 // Status is an issue's workflow state.
@@ -38,7 +52,16 @@ const (
 // Valid reports whether t is a known issue type.
 func (t IssueType) Valid() bool {
 	switch t {
-	case TypeFeature, TypeBug, TypeTask, TypeChore:
+	case TypeFeature, TypeBug, TypeTask, TypeChore, TypePlan:
+		return true
+	}
+	return false
+}
+
+// Valid reports whether a is a known approval state.
+func (a Approval) Valid() bool {
+	switch a {
+	case ApprovalPending, ApprovalApproved:
 		return true
 	}
 	return false
@@ -71,6 +94,7 @@ type IssueFilter struct {
 	Owner     string
 	Label     string // free-text label; matches issues carrying it in issue_label
 	ProjectID string // scope to a single project
+	ParentID  string // scope to a single parent (an issue's children, e.g. a plan's tracers)
 }
 
 // ErrInvalidIssue is returned when an issue fails validation.
@@ -87,6 +111,7 @@ type Issue struct {
 	Owner     string     `json:"owner,omitempty"`
 	ParentID  *string    `json:"parent_id,omitempty"`
 	ProjectID *string    `json:"project_id,omitempty"`
+	Approval  Approval   `json:"approval,omitempty"`
 	Labels    []string   `json:"labels,omitempty"`
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`

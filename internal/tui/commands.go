@@ -56,6 +56,21 @@ type commentAddedMsg struct {
 	err     error
 }
 
+type planApprovedMsg struct {
+	gen   int
+	issue domain.Issue
+	err   error
+}
+
+// approvePlanCmd approves a plan issue via the daemon.
+func (m *Model) approvePlanCmd(id string, gen int) tea.Cmd {
+	ctx, c := m.ctx, m.client
+	return func() tea.Msg {
+		res, err := c.ApprovePlan(ctx, id)
+		return planApprovedMsg{gen: gen, issue: res.Issue, err: err}
+	}
+}
+
 // loadIssuesCmd lists live issues.
 func (m *Model) loadIssuesCmd(gen int) tea.Cmd {
 	ctx, c := m.ctx, m.client
@@ -114,6 +129,18 @@ func (m *Model) loadDetailCmd(id string, gen int) tea.Cmd {
 			return detailLoadedMsg{gen: gen, err: err}
 		}
 		d.transcripts = tr.Transcripts
+		// A plan issue also shows its tracer children, in run order. Loading them
+		// is best-effort: a child-list failure must not discard the successfully
+		// loaded detail (which would, on the post-approval path, drop the whole
+		// issue). Instead the failure is recorded on childErr and the tracer
+		// section reports it as "unavailable" (distinct from a childless plan).
+		if ir.Issue.Type == domain.TypePlan {
+			if lr, err := c.ListIssues(ctx, map[string]string{"parent": id}); err == nil {
+				d.children = lr.Issues
+			} else {
+				d.childErr = err // recorded so the tracer section renders "unavailable", not empty
+			}
+		}
 		return detailLoadedMsg{gen: gen, detail: d}
 	}
 }

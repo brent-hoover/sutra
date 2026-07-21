@@ -138,3 +138,20 @@ To let multiple agents work concurrently after S2 without colliding:
   begin after S3 and extend as later tracks land.
 - **Verify:** launch the TUI, create/edit/close an issue and create a child;
   open an issue to see its documents, comments, and linked transcripts.
+
+## Slice 13: Plan tickets
+- **Stories:** Build a plan into a ticket tree · Approve a plan
+- **Why now:** turns an approved plan directly into tracked work; builds on the
+  issue type/parent/blocking/ledger foundation (S1/S3/S4).
+- **Verify:** `sutra plan build` creates a `plan` issue (approval `pending`) with
+  one tracer child per step and a sequential blocking chain; `sutra plan approve`
+  moves it to `approved` (idempotent, rejects non-plan); the TUI approves from the
+  detail view. See `feature-work/plan-expansion/`.
+
+## Slice 14: Plan traversal
+- **Stories:** Enumerate a plan's tracers in order · Complete tracers
+- **Why now:** makes the S13 tree usable — an agent pointed at a plan works it to
+  completion.
+- **Verify:** `sutra list --parent <plan-id>` returns the tracer children in run
+  order with status; closing a tracer is reflected on the next traversal; the TUI
+  plan detail lists the tracers.
