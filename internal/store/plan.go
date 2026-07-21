@@ -107,6 +107,29 @@ func (s *Store) ApprovePlan(id string, entry domain.LedgerEntry) (domain.Issue, 
 	}
 	defer tx.Rollback()
 
+	now := time.Now().UTC()
+	res, err := tx.Exec(
+		`UPDATE issues SET approval = ?, updated_at = ? WHERE id = ? AND type = ? AND approval = ?`,
+		string(domain.ApprovalApproved), now.Format(timeFmt), id, string(domain.TypePlan), string(domain.ApprovalPending),
+	)
+	if err != nil {
+		return domain.Issue{}, fmt.Errorf("approve plan: %w", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return domain.Issue{}, fmt.Errorf("approve plan rows affected: %w", err)
+	}
+	if changed == 1 {
+		entry.At = now
+		if err := insertLedger(tx, []domain.LedgerEntry{entry}); err != nil {
+			return domain.Issue{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.Issue{}, err
+		}
+		return s.GetIssue(id)
+	}
+
 	var typ, approval string
 	err = tx.QueryRow(`SELECT type, approval FROM issues WHERE id = ?`, id).Scan(&typ, &approval)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -126,20 +149,5 @@ func (s *Store) ApprovePlan(id string, entry domain.LedgerEntry) (domain.Issue, 
 	if planApproval != domain.ApprovalPending {
 		return domain.Issue{}, errors.Join(domain.ErrInvalidIssue, fmt.Errorf("plan approval is %q", approval))
 	}
-
-	now := time.Now().UTC()
-	if _, err := tx.Exec(
-		`UPDATE issues SET approval = ?, updated_at = ? WHERE id = ?`,
-		string(domain.ApprovalApproved), now.Format(timeFmt), id,
-	); err != nil {
-		return domain.Issue{}, fmt.Errorf("approve plan: %w", err)
-	}
-	entry.At = now
-	if err := insertLedger(tx, []domain.LedgerEntry{entry}); err != nil {
-		return domain.Issue{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Issue{}, err
-	}
-	return s.GetIssue(id)
+	return domain.Issue{}, errors.Join(domain.ErrInvalidIssue, errors.New("plan approval was not updated"))
 }
