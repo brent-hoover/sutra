@@ -108,6 +108,9 @@ func TestUpdateIssueRejectsPlanTypeTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
+	if _, err := svc.ApprovePlan(plan.ID); err != nil {
+		t.Fatalf("ApprovePlan: %v", err)
+	}
 	toTask := domain.TypeTask
 	if _, err := svc.UpdateIssue(plan.ID, service.IssueUpdate{Type: &toTask}); !errors.Is(err, domain.ErrInvalidIssue) {
 		t.Fatalf("plan -> task err = %v, want ErrInvalidIssue", err)
@@ -116,8 +119,8 @@ func TestUpdateIssueRejectsPlanTypeTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get plan: %v", err)
 	}
-	if got.Type != domain.TypePlan || got.Approval != domain.ApprovalPending {
-		t.Errorf("plan type/approval = %q/%q, want plan/pending", got.Type, got.Approval)
+	if got.Type != domain.TypePlan || got.Approval != domain.ApprovalApproved {
+		t.Errorf("plan type/approval = %q/%q, want plan/approved", got.Type, got.Approval)
 	}
 }
 

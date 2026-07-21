@@ -173,6 +173,14 @@ func TestUpdateIssueRejectsPlanTypeTransitions(t *testing.T) {
 	if err := json.Unmarshal(raw, &built); err != nil {
 		t.Fatalf("decode built: %v", err)
 	}
+	resp, err := http.Post(srv.URL+"/issues/"+built.Plan.ID+"/plan/approve", "application/json", nil)
+	if err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("approve status = %d, want 200", resp.StatusCode)
+	}
 	if got := patchType(built.Plan.ID, "task"); got != http.StatusBadRequest {
 		t.Errorf("plan -> task status = %d, want 400", got)
 	}
