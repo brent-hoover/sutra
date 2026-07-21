@@ -25,11 +25,12 @@ them. Timestamps are UTC. IDs are short stable identifiers (kata-style).
 | `id` | string | yes | short stable id, generated |
 | `subject` | string | yes | the one required content field |
 | `body` | string | yes | the one required content field |
-| `type` | enum | no | `feature` \| `bug` \| `task` \| `chore`; default `task` |
+| `type` | enum | no | `feature` \| `bug` \| `task` \| `chore` \| `plan`; default `task` |
 | `status` | enum | no | `open` \| `in_progress` \| `closed`; default `open` |
 | `priority` | enum | no | `p0` \| `p1` \| `p2` \| `p3`; default `p2` |
+| `approval` | enum | no | `pending` \| `approved`; empty for non-plan issues. A `plan` issue starts `pending` and moves one-way to `approved`. A distinct axis from `status`. |
 | `owner` | string | no | the **agent** assigned to the issue (agent-assisted dev), not a human user |
-| `parent_id` | string → Issue | no | parent in the parent/child tree |
+| `parent_id` | string → Issue | no | parent in the parent/child tree. A `plan`'s tracer children point here; a plan may itself point at the feature issue it plans |
 | `project_id` | string → Project | no | nullable project scope; cleared (with a ledger entry) if the project is deleted |
 | `labels` | []string | no | read-derived view over the `issue_label` join; free-text tags |
 | `deleted_at` | timestamp | no | null = live; set = soft-deleted |
@@ -45,6 +46,16 @@ them. Timestamps are UTC. IDs are short stable identifiers (kata-style).
   - An Issue cannot be its own parent.
   - A soft-deleted Issue (`deleted_at` set) is excluded from default lists
     and search.
+  - `approval` is meaningful only for `type = plan`; it starts `pending` on
+    build and moves one-way to `approved` (never back). Approving is idempotent
+    and rejected for a non-plan issue.
+  - A `plan` issue and its tracer children are created atomically (see
+    `store.BuildPlan`): the plan, one child per tracer item, a sequential
+    `issue_block` chain (child *i* blocks *i+1*), and a `created` ledger entry
+    per new issue — all in one transaction. Children are stamped with a
+    strictly-increasing `created_at` so `list` returns them in run order.
+  - The issue **type** `plan` is a distinct axis from the document **kind**
+    `plan` (`problem|design|plan|scenarios`); they are unrelated.
 
 ### Comment
 - **Module:** `domain`
