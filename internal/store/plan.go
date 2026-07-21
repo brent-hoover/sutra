@@ -24,10 +24,11 @@ func (s *Store) migrateApproval() error {
 // blocking chain (child i blocks child i+1) in one transaction, along with the
 // supplied ledger entries. If plan.ParentID is set it must exist; the plan's
 // project is inherited from that parent when plan.ProjectID is nil, and the
-// resolved project is stamped on the plan and every child. Any failure rolls the
-// whole tree back, so a partial plan is never visible. The caller is responsible
-// for ordering children (their strictly-increasing created_at fixes list order)
-// and for setting each child's ParentID to the plan's id.
+// resolved project is stamped on the plan and every child. Child order comes from
+// the slice order: BuildPlan stamps sortable child timestamps before persisting
+// so ListIssues returns tracers in run order. Any failure rolls the whole tree
+// back, so a partial plan is never visible. The caller is responsible for setting
+// each child's ParentID to the plan's id.
 func (s *Store) BuildPlan(plan domain.Issue, children []domain.Issue, ledger []domain.LedgerEntry) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -63,7 +64,11 @@ func (s *Store) BuildPlan(plan domain.Issue, children []domain.Issue, ledger []d
 	if err := insertIssueTx(tx, plan); err != nil {
 		return err
 	}
+	childBase := plan.CreatedAt.UTC().Truncate(time.Second)
 	for i := range children {
+		childAt := childBase.Add(time.Duration(i+1) * time.Second)
+		children[i].CreatedAt = childAt
+		children[i].UpdatedAt = childAt
 		children[i].ProjectID = plan.ProjectID
 		if err := insertIssueTx(tx, children[i]); err != nil {
 			return err
@@ -107,9 +112,13 @@ func (s *Store) ApprovePlan(id string, entry domain.LedgerEntry) (domain.Issue, 
 	if domain.IssueType(typ) != domain.TypePlan {
 		return domain.Issue{}, errors.Join(domain.ErrInvalidIssue, errors.New("issue is not a plan"))
 	}
-	if domain.Approval(approval) == domain.ApprovalApproved {
+	planApproval := domain.Approval(approval)
+	if planApproval == domain.ApprovalApproved {
 		_ = tx.Rollback() // release the connection before the read-back
 		return s.GetIssue(id)
+	}
+	if planApproval != domain.ApprovalPending {
+		return domain.Issue{}, errors.Join(domain.ErrInvalidIssue, fmt.Errorf("plan approval is %q", approval))
 	}
 
 	now := time.Now().UTC()

@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,9 +10,9 @@ import (
 	"github.com/brent-hoover/sutra/internal/domain"
 )
 
-// buildTestPlan assembles a plan issue + n tracer children (monotonic
-// created_at, ParentID set to the plan, one created ledger entry each) and calls
-// BuildPlan. parentID/projectID are optional references on the plan itself.
+// buildTestPlan assembles a plan issue + n tracer children (ParentID set to the
+// plan, one created ledger entry each) and calls BuildPlan. parentID/projectID
+// are optional references on the plan itself.
 func buildTestPlan(t *testing.T, s *Store, n int, parentID, projectID *string) (domain.Issue, []domain.Issue) {
 	t.Helper()
 	now := time.Now().UTC()
@@ -24,13 +25,12 @@ func buildTestPlan(t *testing.T, s *Store, n int, parentID, projectID *string) (
 	ledger := []domain.LedgerEntry{{ID: domain.NewID(), IssueID: plan.ID, At: now, Kind: domain.LedgerCreated}}
 	children := make([]domain.Issue, n)
 	for i := range children {
-		at := now.Add(time.Duration(i + 1)) // strictly increasing → deterministic order
 		children[i] = domain.Issue{
-			ID: domain.NewID(), Subject: "tracer", Body: "b",
+			ID: fmt.Sprintf("tracer-%02d-%s", n-i, domain.NewID()), Subject: "tracer", Body: "b",
 			Type: domain.TypeTask, Status: domain.StatusOpen, Priority: domain.P2,
-			ParentID: &plan.ID, CreatedAt: at, UpdatedAt: at,
+			ParentID: &plan.ID, CreatedAt: now, UpdatedAt: now,
 		}
-		ledger = append(ledger, domain.LedgerEntry{ID: domain.NewID(), IssueID: children[i].ID, At: at, Kind: domain.LedgerCreated})
+		ledger = append(ledger, domain.LedgerEntry{ID: domain.NewID(), IssueID: children[i].ID, At: now, Kind: domain.LedgerCreated})
 	}
 	if err := s.BuildPlan(plan, children, ledger); err != nil {
 		t.Fatalf("BuildPlan: %v", err)
@@ -49,7 +49,7 @@ func TestBuildPlanCreatesChainedTreeInOrder(t *testing.T) {
 	if got.Type != domain.TypePlan || got.Approval != domain.ApprovalPending {
 		t.Fatalf("plan type/approval = %q/%q", got.Type, got.Approval)
 	}
-	// Each child parents the plan; created_at is strictly increasing (run order).
+	// Each child parents the plan; BuildPlan stamps created_at in run order.
 	var last time.Time
 	for i, c := range children {
 		cv, err := s.GetIssue(c.ID)
@@ -158,29 +158,61 @@ func TestBuildPlanRejectsParentProjectConflict(t *testing.T) {
 	}
 }
 
-func TestBuildPlanRollsBackOnMissingParent(t *testing.T) {
+func TestBuildPlanRollsBackAfterLedgerFailure(t *testing.T) {
 	s := openStore(t)
 	now := time.Now().UTC()
 	plan := domain.Issue{
 		ID: domain.NewID(), Subject: "p", Body: "b", Type: domain.TypePlan,
 		Status: domain.StatusOpen, Priority: domain.P2, Approval: domain.ApprovalPending,
-		ParentID: strptr("nonexistent"), CreatedAt: now, UpdatedAt: now,
-	}
-	child := domain.Issue{
-		ID: domain.NewID(), Subject: "c", Body: "b", Type: domain.TypeTask,
-		Status: domain.StatusOpen, Priority: domain.P2, ParentID: &plan.ID,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	err := s.BuildPlan(plan, []domain.Issue{child},
-		[]domain.LedgerEntry{{ID: domain.NewID(), IssueID: plan.ID, At: now, Kind: domain.LedgerCreated}})
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("BuildPlan err = %v, want ErrNotFound", err)
+	children := []domain.Issue{
+		{
+			ID: domain.NewID(), Subject: "c1", Body: "b", Type: domain.TypeTask,
+			Status: domain.StatusOpen, Priority: domain.P2, ParentID: &plan.ID,
+			CreatedAt: now, UpdatedAt: now,
+		},
+		{
+			ID: domain.NewID(), Subject: "c2", Body: "b", Type: domain.TypeTask,
+			Status: domain.StatusOpen, Priority: domain.P2, ParentID: &plan.ID,
+			CreatedAt: now, UpdatedAt: now,
+		},
+	}
+	ledgerID := domain.NewID()
+	err := s.BuildPlan(plan, children, []domain.LedgerEntry{
+		{ID: ledgerID, IssueID: plan.ID, At: now, Kind: domain.LedgerCreated},
+		{ID: ledgerID, IssueID: children[0].ID, At: now, Kind: domain.LedgerCreated},
+	})
+	if err == nil {
+		t.Fatalf("BuildPlan err = nil, want duplicate ledger failure")
 	}
 	if _, err := s.GetIssue(plan.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("plan was persisted despite rollback")
 	}
-	if _, err := s.GetIssue(child.ID); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("child was persisted despite rollback")
+	for _, child := range children {
+		if _, err := s.GetIssue(child.ID); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("child %s was persisted despite rollback", child.ID)
+		}
+	}
+	var edges int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM issue_block WHERE blocker_id = ? AND blocked_id = ?`,
+		children[0].ID, children[1].ID,
+	).Scan(&edges); err != nil {
+		t.Fatalf("count block edges: %v", err)
+	}
+	if edges != 0 {
+		t.Errorf("block edge count = %d, want 0", edges)
+	}
+	var ledgerRows int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM ledger WHERE id = ? OR issue_id IN (?, ?, ?)`,
+		ledgerID, plan.ID, children[0].ID, children[1].ID,
+	).Scan(&ledgerRows); err != nil {
+		t.Fatalf("count ledger rows: %v", err)
+	}
+	if ledgerRows != 0 {
+		t.Errorf("ledger rows = %d, want 0", ledgerRows)
 	}
 }
 
@@ -230,6 +262,9 @@ func TestApprovePlanIdempotent(t *testing.T) {
 func TestApprovePlanRejectsInvalidTargets(t *testing.T) {
 	s := openStore(t)
 	now := time.Now().UTC()
+	entry := func(id string) domain.LedgerEntry {
+		return domain.LedgerEntry{ID: domain.NewID(), IssueID: id, Kind: domain.LedgerUpdated, Field: "approval"}
+	}
 	task := domain.Issue{
 		ID: domain.NewID(), Subject: "t", Body: "b", Type: domain.TypeTask,
 		Status: domain.StatusOpen, Priority: domain.P2, CreatedAt: now, UpdatedAt: now,
@@ -237,11 +272,23 @@ func TestApprovePlanRejectsInvalidTargets(t *testing.T) {
 	if err := s.CreateIssue(task, []domain.LedgerEntry{{ID: domain.NewID(), IssueID: task.ID, At: now, Kind: domain.LedgerCreated}}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	entry := domain.LedgerEntry{ID: domain.NewID(), IssueID: task.ID, Kind: domain.LedgerUpdated, Field: "approval"}
-	if _, err := s.ApprovePlan(task.ID, entry); !errors.Is(err, domain.ErrInvalidIssue) {
+	if _, err := s.ApprovePlan(task.ID, entry(task.ID)); !errors.Is(err, domain.ErrInvalidIssue) {
 		t.Errorf("approve task err = %v, want ErrInvalidIssue", err)
 	}
-	if _, err := s.ApprovePlan("missing", entry); !errors.Is(err, domain.ErrNotFound) {
+	for _, approval := range []domain.Approval{"", "reviewing"} {
+		plan := domain.Issue{
+			ID: domain.NewID(), Subject: "p", Body: "b", Type: domain.TypePlan,
+			Status: domain.StatusOpen, Priority: domain.P2, Approval: approval,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := s.CreateIssue(plan, []domain.LedgerEntry{{ID: domain.NewID(), IssueID: plan.ID, At: now, Kind: domain.LedgerCreated}}); err != nil {
+			t.Fatalf("create plan with approval %q: %v", approval, err)
+		}
+		if _, err := s.ApprovePlan(plan.ID, entry(plan.ID)); !errors.Is(err, domain.ErrInvalidIssue) {
+			t.Errorf("approve plan with approval %q err = %v, want ErrInvalidIssue", approval, err)
+		}
+	}
+	if _, err := s.ApprovePlan("missing", entry("missing")); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("approve missing err = %v, want ErrNotFound", err)
 	}
 }
