@@ -25,6 +25,7 @@ type issueDetail struct {
 	documents   []domain.Document
 	transcripts []domain.Transcript
 	comments    []domain.Comment
+	children    []domain.Issue // tracer children, for a plan issue
 }
 
 // Model is the Bubble Tea model for the Sutra TUI. It talks to the daemon
@@ -316,4 +317,12 @@ func (m *Model) DetailComments() []domain.Comment {
 		return nil
 	}
 	return m.detail.comments
+}
+
+// DetailChildren returns the tracer children shown for a plan issue's detail.
+func (m *Model) DetailChildren() []domain.Issue {
+	if m.detail == nil {
+		return nil
+	}
+	return m.detail.children
 }

@@ -129,6 +129,14 @@ func (m *Model) loadDetailCmd(id string, gen int) tea.Cmd {
 			return detailLoadedMsg{gen: gen, err: err}
 		}
 		d.transcripts = tr.Transcripts
+		// A plan issue also shows its tracer children, in run order.
+		if ir.Issue.Type == domain.TypePlan {
+			lr, err := c.ListIssues(ctx, map[string]string{"parent": id})
+			if err != nil {
+				return detailLoadedMsg{gen: gen, err: err}
+			}
+			d.children = lr.Issues
+		}
 		return detailLoadedMsg{gen: gen, detail: d}
 	}
 }

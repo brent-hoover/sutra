@@ -87,6 +87,16 @@ func (m *Model) renderDetail() string {
 	}
 	fmt.Fprintf(&b, "\n%s\n", clean(i.Body))
 
+	if i.Type == domain.TypePlan {
+		fmt.Fprintf(&b, "\n%s\n", styles.section.Render(fmt.Sprintf("Tracers (%d)", len(d.children))))
+		if len(d.children) == 0 {
+			b.WriteString(styles.dim.Render("  (none)") + "\n")
+		}
+		for idx, c := range d.children {
+			fmt.Fprintf(&b, "  %d. %s [%s] %s\n", idx+1, cleanLine(c.ID), c.Status, cleanLine(c.Subject))
+		}
+	}
+
 	fmt.Fprintf(&b, "\n%s\n", styles.section.Render(fmt.Sprintf("Documents (%d)", len(d.documents))))
 	if len(d.documents) == 0 {
 		b.WriteString(styles.dim.Render("  (none)") + "\n")

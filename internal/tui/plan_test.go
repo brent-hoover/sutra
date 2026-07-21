@@ -73,6 +73,24 @@ func TestPlanApprovedMsgStaleIsDropped(t *testing.T) {
 	}
 }
 
+func TestRenderDetailShowsTracers(t *testing.T) {
+	m := planDetailModel(domain.TypePlan, domain.ApprovalApproved)
+	m.detail.children = []domain.Issue{
+		{ID: "c1", Subject: "first tracer", Status: domain.StatusClosed},
+		{ID: "c2", Subject: "second tracer", Status: domain.StatusOpen},
+	}
+	out := m.renderDetail()
+	for _, want := range []string{"Tracers (2)", "c1", "first tracer", "closed", "c2", "second tracer"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("plan detail missing %q:\n%s", want, out)
+		}
+	}
+	// A non-plan issue shows no Tracers section.
+	if strings.Contains(planDetailModel(domain.TypeTask, "").renderDetail(), "Tracers") {
+		t.Error("non-plan detail should not show a Tracers section")
+	}
+}
+
 func TestRenderDetailShowsPlanApproval(t *testing.T) {
 	m := planDetailModel(domain.TypePlan, domain.ApprovalPending)
 	out := m.renderDetail()
