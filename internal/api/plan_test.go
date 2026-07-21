@@ -52,8 +52,10 @@ func TestBuildPlanEndpointRejections(t *testing.T) {
 		{"empty steps", `{"title":"t","prose":"p","steps":[]}`, http.StatusBadRequest},
 		{"empty subject", `{"title":"t","prose":"p","steps":[{"subject":""}]}`, http.StatusBadRequest},
 		{"invalid type", `{"title":"t","prose":"p","steps":[{"subject":"a","type":"epic"}]}`, http.StatusBadRequest},
+		{"plan type", `{"title":"t","prose":"p","steps":[{"subject":"a","type":"plan"}]}`, http.StatusBadRequest},
 		{"empty title", `{"title":"","prose":"p","steps":[{"subject":"a"}]}`, http.StatusBadRequest},
-		{"missing parent", `{"title":"t","prose":"p","parent_id":"nope","steps":[{"subject":"a"}]}`, http.StatusBadRequest},
+		{"missing parent", `{"title":"t","prose":"p","parent_id":"nope","steps":[{"subject":"a"}]}`, http.StatusNotFound},
+		{"missing project", `{"title":"t","prose":"p","project_id":"nope","steps":[{"subject":"a"}]}`, http.StatusNotFound},
 		{"unknown field", `{"title":"t","prose":"p","bogus":1,"steps":[{"subject":"a"}]}`, http.StatusBadRequest},
 	}
 	for _, tc := range cases {
@@ -139,5 +141,39 @@ func TestApprovePlanEndpoint(t *testing.T) {
 	resp3.Body.Close()
 	if resp3.StatusCode != http.StatusNotFound {
 		t.Errorf("approve missing status = %d, want 404", resp3.StatusCode)
+	}
+}
+
+func TestUpdateIssueRejectsPlanTypeTransitions(t *testing.T) {
+	srv := newTestServer(t)
+	patchType := func(id, typ string) int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPatch, srv.URL+"/issues/"+id, strings.NewReader(`{"type":"`+typ+`"}`))
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("PATCH: %v", err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	task := postIssue(t, srv, `{"subject":"x","body":"y"}`)
+	if got := patchType(task.ID, "plan"); got != http.StatusBadRequest {
+		t.Errorf("task -> plan status = %d, want 400", got)
+	}
+
+	_, raw := postPlan(t, srv, `{"title":"t","prose":"p","steps":[{"subject":"a"}]}`)
+	var built struct {
+		Plan domain.Issue `json:"plan"`
+	}
+	if err := json.Unmarshal(raw, &built); err != nil {
+		t.Fatalf("decode built: %v", err)
+	}
+	if got := patchType(built.Plan.ID, "task"); got != http.StatusBadRequest {
+		t.Errorf("plan -> task status = %d, want 400", got)
 	}
 }

@@ -65,6 +65,7 @@ func TestBuildPlanValidation(t *testing.T) {
 		{"no steps", "t", "prose", nil},
 		{"empty subject", "t", "prose", []service.PlanStep{{Subject: ""}}},
 		{"bad type", "t", "prose", []service.PlanStep{{Subject: "a", Type: domain.IssueType("epic")}}},
+		{"plan type", "t", "prose", []service.PlanStep{{Subject: "a", Type: domain.TypePlan}}},
 		{"bad priority", "t", "prose", []service.PlanStep{{Subject: "a", Priority: domain.Priority("p9")}}},
 	}
 	for _, tc := range cases {
@@ -89,6 +90,34 @@ func TestBuildPlanLinksParent(t *testing.T) {
 	}
 	if plan.ParentID == nil || *plan.ParentID != feat.ID {
 		t.Errorf("plan parent = %v, want %s", plan.ParentID, feat.ID)
+	}
+}
+
+func TestUpdateIssueRejectsPlanTypeTransitions(t *testing.T) {
+	svc := newService(t, t.TempDir())
+	task, err := svc.CreateIssue("task", "b")
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	toPlan := domain.TypePlan
+	if _, err := svc.UpdateIssue(task.ID, service.IssueUpdate{Type: &toPlan}); !errors.Is(err, domain.ErrInvalidIssue) {
+		t.Fatalf("task -> plan err = %v, want ErrInvalidIssue", err)
+	}
+
+	plan, _, err := svc.BuildPlan("plan", "prose", []service.PlanStep{{Subject: "a"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	toTask := domain.TypeTask
+	if _, err := svc.UpdateIssue(plan.ID, service.IssueUpdate{Type: &toTask}); !errors.Is(err, domain.ErrInvalidIssue) {
+		t.Fatalf("plan -> task err = %v, want ErrInvalidIssue", err)
+	}
+	got, err := svc.GetIssue(plan.ID)
+	if err != nil {
+		t.Fatalf("get plan: %v", err)
+	}
+	if got.Type != domain.TypePlan || got.Approval != domain.ApprovalPending {
+		t.Errorf("plan type/approval = %q/%q, want plan/pending", got.Type, got.Approval)
 	}
 }
 

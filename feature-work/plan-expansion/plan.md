@@ -39,9 +39,11 @@ pass and roborev returns P.
 ### 1. Domain: `plan` type + `approval` field
 
 **What:** `internal/domain/issue.go` — add `TypePlan IssueType = "plan"` (include
-in `IssueType.Valid()`); add `type Approval string` with `ApprovalPending`,
-`ApprovalApproved`, and `Approval.Valid()`; add `Approval Approval` to `Issue`
-(`json:"approval,omitempty"`).
+in `IssueType.Valid()` for reads/list filters); add `type Approval string` with
+`ApprovalPending`, `ApprovalApproved`, and `Approval.Valid()`; add
+`Approval Approval` to `Issue` (`json:"approval,omitempty"`). Generic type
+updates must reject transitions to/from `plan`, and tracer children must reject
+`TypePlan`.
 
 **Why:** foundation every other layer depends on.
 
@@ -51,10 +53,10 @@ in `IssueType.Valid()`); add `type Approval string` with `ApprovalPending`,
 
 ### 2. Store: `approval` column round-trip
 
-**What:** add a `migrateApproval` method
-(`ALTER TABLE issues ADD COLUMN approval TEXT NOT NULL DEFAULT ''`) and **register
-its call in `migrate()` in `internal/store/store.go`** (migrations are not
-auto-discovered). Extend `issueColumns`, `scanIssue`, and `CreateIssue`'s insert in
+**What:** add a `migrateApproval` method using `addColumnIfMissing("issues",
+"approval", "TEXT NOT NULL DEFAULT ''")` and **register its call in `migrate()` in
+`internal/store/store.go`** (migrations are not auto-discovered). Extend
+`issueColumns`, `scanIssue`, and `CreateIssue`'s insert in
 `internal/store/issues.go` so `approval` reads/creates correctly. Leave the generic
 `UpdateIssueTx` `SET` clause untouched (that omission preserves `approval` across
 ordinary updates).
@@ -62,31 +64,33 @@ ordinary updates).
 **Why:** persist the new field before anything writes it.
 
 **Verify:** `go test ./internal/store/` — a round-trip test creates an issue and
-reads `approval` back as `""`. Exit 0.
+reads `approval` back as `""`, and a reopen test proves the migration is
+idempotent. Exit 0.
 
 ### 3. Store: `BuildPlan` + `ApprovePlan`
 
 **What:** new `internal/store/plan.go`: `BuildPlan` (one tx — resolve parent
-existence + project inheritance in-tx, insert plan then children with
-strictly-increasing `created_at`, `issue_block` chain, `created` ledger per issue)
-and `ApprovePlan` (one tx — `ErrNotFound`/non-plan `ErrInvalidIssue`, idempotent
-when already approved, else set `approval`, bump `updated_at`, `updated`/`approval`
-ledger).
+existence + project inheritance in-tx, validate explicit `project_id`, reject a
+parent/project mismatch, insert plan then children with strictly-increasing
+`created_at`, `issue_block` chain, `created` ledger per issue) and `ApprovePlan`
+(one tx — `ErrNotFound`/non-plan `ErrInvalidIssue`, idempotent when already
+approved, else set `approval`, bump `updated_at`, `updated`/`approval` ledger).
 
 **Why:** atomic persistence and the approval transition.
 
 **Verify:** `go test ./internal/store/` — new `plan_test.go` covers build atomicity
 (rollback on bad child leaves nothing), monotonic order, project inheritance,
-approve idempotency, and non-plan rejection. Exit 0.
+missing project rejection, parent/project conflict rejection, approve idempotency,
+and non-plan rejection. Exit 0.
 
 ### 4. Service: `PlanStep`, `BuildPlan`, `ApprovePlan`
 
 **What:** new `internal/service/plan.go` — `PlanStep{Subject,Body,Type,Priority}`;
 `BuildPlan(title, prose, steps, parentID, projectID)` generating all ids up front
 (so `child.ParentID = plan.ID`), validating (non-empty title/prose/steps, non-empty
-subjects, valid enums), resolving defaults (`task`/`p2`, empty body → subject),
-calling `store.BuildPlan`; `ApprovePlan(id)` stamping the ledger entry and calling
-`store.ApprovePlan`.
+subjects, valid non-plan tracer types, valid priorities), resolving defaults
+(`task`/`p2`, empty body → subject), calling `store.BuildPlan`; `ApprovePlan(id)`
+stamping the ledger entry and calling `store.ApprovePlan`.
 
 **Why:** the validation boundary and use-case orchestration.
 

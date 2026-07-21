@@ -42,7 +42,7 @@ func (s *Server) buildPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, children, err := s.svc.BuildPlan(req.Title, req.Prose, steps, req.ParentID, req.ProjectID)
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusBadRequest, "parent or project not found")
+		writeError(w, http.StatusNotFound, "parent or project not found")
 		return
 	}
 	if errors.Is(err, domain.ErrInvalidIssue) {

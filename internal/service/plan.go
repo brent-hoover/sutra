@@ -40,8 +40,10 @@ func (s *Service) BuildPlan(title, prose string, steps []PlanStep, parentID, pro
 		if step.Subject == "" {
 			return domain.Issue{}, nil, errors.Join(domain.ErrInvalidIssue, fmt.Errorf("tracer item %d has an empty subject", i+1))
 		}
-		if step.Type != "" && !step.Type.Valid() {
-			return domain.Issue{}, nil, errors.Join(domain.ErrInvalidIssue, fmt.Errorf("tracer item %d has invalid type %q", i+1, step.Type))
+		if step.Type != "" {
+			if !step.Type.Valid() || step.Type == domain.TypePlan {
+				return domain.Issue{}, nil, errors.Join(domain.ErrInvalidIssue, fmt.Errorf("tracer item %d has invalid type %q", i+1, step.Type))
+			}
 		}
 		if step.Priority != "" && !step.Priority.Valid() {
 			return domain.Issue{}, nil, errors.Join(domain.ErrInvalidIssue, fmt.Errorf("tracer item %d has invalid priority %q", i+1, step.Priority))

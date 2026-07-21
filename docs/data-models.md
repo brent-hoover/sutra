@@ -49,6 +49,8 @@ them. Timestamps are UTC. IDs are short stable identifiers (kata-style).
   - `approval` is meaningful only for `type = plan`; it starts `pending` on
     build and moves one-way to `approved` (never back). Approving is idempotent
     and rejected for a non-plan issue.
+  - `type = plan` is entered only through `BuildPlan`; generic issue updates
+    reject transitions to or from `plan`.
   - A `plan` issue and its tracer children are created atomically (see
     `store.BuildPlan`): the plan, one child per tracer item, a sequential
     `issue_block` chain (child *i* blocks *i+1*), and a `created` ledger entry

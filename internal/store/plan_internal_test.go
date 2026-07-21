@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func buildTestPlan(t *testing.T, s *Store, n int, parentID, projectID *string) (
 	ledger := []domain.LedgerEntry{{ID: domain.NewID(), IssueID: plan.ID, At: now, Kind: domain.LedgerCreated}}
 	children := make([]domain.Issue, n)
 	for i := range children {
-		at := now.Add(time.Duration(i+1)) // strictly increasing → deterministic order
+		at := now.Add(time.Duration(i + 1)) // strictly increasing → deterministic order
 		children[i] = domain.Issue{
 			ID: domain.NewID(), Subject: "tracer", Body: "b",
 			Type: domain.TypeTask, Status: domain.StatusOpen, Priority: domain.P2,
@@ -97,6 +98,63 @@ func TestBuildPlanInheritsParentProject(t *testing.T) {
 		if gc.ProjectID == nil || *gc.ProjectID != p.ID {
 			t.Errorf("child project = %v, want %s", gc.ProjectID, p.ID)
 		}
+	}
+}
+
+func TestBuildPlanRejectsMissingProject(t *testing.T) {
+	s := openStore(t)
+	now := time.Now().UTC()
+	plan := domain.Issue{
+		ID: domain.NewID(), Subject: "p", Body: "b", Type: domain.TypePlan,
+		Status: domain.StatusOpen, Priority: domain.P2, Approval: domain.ApprovalPending,
+		ProjectID: strptr("missing"), CreatedAt: now, UpdatedAt: now,
+	}
+	child := domain.Issue{
+		ID: domain.NewID(), Subject: "c", Body: "b", Type: domain.TypeTask,
+		Status: domain.StatusOpen, Priority: domain.P2, ParentID: &plan.ID,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	err := s.BuildPlan(plan, []domain.Issue{child},
+		[]domain.LedgerEntry{{ID: domain.NewID(), IssueID: plan.ID, At: now, Kind: domain.LedgerCreated}})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("BuildPlan err = %v, want ErrNotFound", err)
+	}
+	if _, err := s.GetIssue(plan.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("plan was persisted despite rollback")
+	}
+}
+
+func TestBuildPlanRejectsParentProjectConflict(t *testing.T) {
+	s := openStore(t)
+	parentProject := newProject(t, s, "parent", "/repos/parent")
+	otherProject := newProject(t, s, "other", "/repos/other")
+	now := time.Now().UTC()
+	parent := domain.Issue{
+		ID: domain.NewID(), Subject: "feature", Body: "b",
+		Type: domain.TypeFeature, Status: domain.StatusOpen, Priority: domain.P2,
+		ProjectID: &parentProject.ID, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.CreateIssue(parent, []domain.LedgerEntry{{ID: domain.NewID(), IssueID: parent.ID, At: now, Kind: domain.LedgerCreated}}); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	plan := domain.Issue{
+		ID: domain.NewID(), Subject: "p", Body: "b", Type: domain.TypePlan,
+		Status: domain.StatusOpen, Priority: domain.P2, Approval: domain.ApprovalPending,
+		ParentID: &parent.ID, ProjectID: &otherProject.ID, CreatedAt: now, UpdatedAt: now,
+	}
+	child := domain.Issue{
+		ID: domain.NewID(), Subject: "c", Body: "b", Type: domain.TypeTask,
+		Status: domain.StatusOpen, Priority: domain.P2, ParentID: &plan.ID,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	err := s.BuildPlan(plan, []domain.Issue{child},
+		[]domain.LedgerEntry{{ID: domain.NewID(), IssueID: plan.ID, At: now, Kind: domain.LedgerCreated}})
+	if !errors.Is(err, domain.ErrInvalidIssue) {
+		t.Fatalf("BuildPlan err = %v, want ErrInvalidIssue", err)
+	}
+	if _, err := s.GetIssue(plan.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("plan was persisted despite rollback")
 	}
 }
 
@@ -230,5 +288,28 @@ func TestApprovalColumnRoundTripsEmpty(t *testing.T) {
 	}
 	if got.Approval != "" {
 		t.Errorf("approval = %q, want empty", got.Approval)
+	}
+}
+
+func TestApprovalMigrationIsIdempotentOnReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if _, err := first.db.Exec(`SELECT approval FROM issues LIMIT 0`); err != nil {
+		t.Fatalf("approval column missing after first open: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first: %v", err)
+	}
+
+	second, err := Open(path)
+	if err != nil {
+		t.Fatalf("second open: %v", err)
+	}
+	t.Cleanup(func() { second.Close() })
+	if _, err := second.db.Exec(`SELECT approval FROM issues LIMIT 0`); err != nil {
+		t.Fatalf("approval column missing after reopen: %v", err)
 	}
 }

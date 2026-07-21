@@ -70,6 +70,8 @@ Delivered as two slices:
 * `bdd_test.go` — add `@slice13` to `implementedTags`.
 * `bdd_slice13_test.go` *(new)* — step definitions.
 * `features/plan-build.feature`, `features/plan-approval.feature` *(new)*.
+* Package-level tests in `internal/{store,service,api,client,cli,tui}/*_test.go`
+  covering the slice 13 behavior.
 
 **@slice14 — traversal**
 * `internal/store/issues.go` — apply `f.ParentID` in `ListIssues`.
@@ -80,6 +82,8 @@ Delivered as two slices:
   (optional traversal view).
 * `bdd_test.go` — add `@slice14`; `bdd_slice14_test.go` *(new)*;
   `features/plan-traversal.feature` *(new)*.
+* Package-level traversal tests in
+  `internal/{store,api,client,cli,tui}/*_test.go`.
 
 **Docs**
 * `docs/data-models.md` — document the `plan` type and `approval` field.

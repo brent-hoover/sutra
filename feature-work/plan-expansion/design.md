@@ -46,7 +46,9 @@ Two slices; the ordering is: type + field + build + approve (@slice13), then the
 traversal filter (@slice14).
 
 **Domain (`internal/domain/issue.go`).**
-- Add `TypePlan IssueType = "plan"`; include it in `IssueType.Valid()`.
+- Add `TypePlan IssueType = "plan"`; include it in `IssueType.Valid()` for
+  reads/list filters, but do not allow generic type updates to transition to or
+  from `plan`.
 - Add `type Approval string` with `ApprovalPending = "pending"`,
   `ApprovalApproved = "approved"`, and `Approval.Valid()`. Add
   `Approval Approval` to `Issue` (`json:"approval,omitempty"`). It is empty for
@@ -54,18 +56,21 @@ traversal filter (@slice14).
 - Add `ParentID string` to `IssueFilter` (@slice14).
 
 **Store.**
-- Migration: `ALTER TABLE issues ADD COLUMN approval TEXT NOT NULL DEFAULT ''`.
-  Extend `issueColumns`, `scanIssue`, and `CreateIssue`'s insert so `approval`
-  round-trips on read/create. The generic `UpdateIssueTx` `SET` clause is left
-  untouched (it omits `approval`, which is exactly what preserves the value across
-  ordinary field updates); only `ApprovePlan` writes the column, in its own
-  transaction.
+- Migration: `migrateApproval` calls `addColumnIfMissing("issues", "approval",
+  "TEXT NOT NULL DEFAULT ''")` so reopening an already-migrated database is a
+  no-op. Extend `issueColumns`, `scanIssue`, and `CreateIssue`'s insert so
+  `approval` round-trips on read/create. The generic `UpdateIssueTx` `SET` clause
+  is left untouched (it omits `approval`, which is exactly what preserves the
+  value across ordinary field updates); only `ApprovePlan` writes the column, in
+  its own transaction.
 - `internal/store/plan.go` (new):
   - `BuildPlan(plan domain.Issue, children []domain.Issue) (domain.Issue, []domain.Issue, error)`
-    — one transaction: if `plan.ParentID` is set, verify it exists; resolve the
-    project (if `plan.ProjectID` is nil and a parent is set, inherit the parent's
-    `project_id`) and stamp it on the plan and every child; insert the plan issue,
-    then each child (each already carrying `ParentID = plan.ID`), then
+    — one transaction: if `plan.ParentID` is set, verify it exists; validate any
+    explicit `plan.ProjectID` exists; resolve the project (if `plan.ProjectID` is
+    nil and a parent is set, inherit the parent's `project_id`); reject an
+    explicit project that conflicts with the parent's project; stamp the resolved
+    project on the plan and every child; insert the plan issue, then each child
+    (each already carrying `ParentID = plan.ID`), then
     `issue_block` rows `(child[i].ID, child[i+1].ID)`; append a `created`
     `LedgerEntry` for the plan and each child. Rolls back on any failure, so a
     partial tree is never visible.
@@ -88,7 +93,8 @@ traversal filter (@slice14).
 - `type PlanStep struct { Subject, Body string; Type domain.IssueType; Priority domain.Priority }`.
 - `BuildPlan(title, prose string, steps []PlanStep, parentID, projectID *string) (domain.Issue, []domain.Issue, error)`
   — validate: `title` and `prose` non-empty; `steps` non-empty; each step's
-  `Subject` non-empty; any non-empty `Type`/`Priority` valid via `.Valid()`.
+  `Subject` non-empty; any non-empty `Type`/`Priority` valid via `.Valid()`, and
+  reject `TypePlan` for tracer children.
   Resolve defaults (step `Type→task`, `Priority→p2`; empty step `Body→Subject` so
   the non-empty-body invariant holds). Compose the plan `domain.Issue`
   (`Type=plan`, `Approval=pending`, `Body=prose`, `Subject=title`, `ParentID`,
@@ -143,6 +149,9 @@ human can see the tree they are approving. `build` is **not** surfaced in the TU
 
 - `issues.approval TEXT NOT NULL DEFAULT ''` — `''` for non-plan issues,
   `pending|approved` for plan issues.
+- `plan` is not a generic issue type transition: only `BuildPlan` creates a
+  `plan`, and generic updates reject both `task|bug|feature|chore → plan` and
+  `plan → task|bug|feature|chore`.
 - No new tables. Ordering reuses `issue_block`; grouping reuses `parent_id`;
   the epic↔feature link reuses `parent_id` (plan issue's own parent).
 - `LedgerEntry.kind` is unchanged (closed enum); approval rides on `updated` with

@@ -37,8 +37,8 @@ func (s *Store) BuildPlan(plan domain.Issue, children []domain.Issue, ledger []d
 
 	// Resolve the parent (if any) inside the tx so a concurrent change can't
 	// dangle the link or race the inherited project.
+	var parentProject sql.NullString
 	if plan.ParentID != nil {
-		var parentProject sql.NullString
 		err := tx.QueryRow(`SELECT project_id FROM issues WHERE id = ?`, *plan.ParentID).Scan(&parentProject)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
@@ -55,6 +55,9 @@ func (s *Store) BuildPlan(plan domain.Issue, children []domain.Issue, ledger []d
 		if err := existsInTx(tx, "projects", *plan.ProjectID); err != nil {
 			return err
 		}
+	}
+	if parentProject.Valid && plan.ProjectID != nil && *plan.ProjectID != parentProject.String {
+		return errors.Join(domain.ErrInvalidIssue, errors.New("plan project does not match parent project"))
 	}
 
 	if err := insertIssueTx(tx, plan); err != nil {
