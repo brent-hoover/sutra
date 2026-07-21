@@ -26,6 +26,7 @@ type issueDetail struct {
 	transcripts []domain.Transcript
 	comments    []domain.Comment
 	children    []domain.Issue // tracer children, for a plan issue
+	childErr    error          // set when the tracer-children load failed (best-effort)
 }
 
 // Model is the Bubble Tea model for the Sutra TUI. It talks to the daemon

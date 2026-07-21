@@ -88,12 +88,18 @@ func (m *Model) renderDetail() string {
 	fmt.Fprintf(&b, "\n%s\n", clean(i.Body))
 
 	if i.Type == domain.TypePlan {
-		fmt.Fprintf(&b, "\n%s\n", styles.section.Render(fmt.Sprintf("Tracers (%d)", len(d.children))))
-		if len(d.children) == 0 {
-			b.WriteString(styles.dim.Render("  (none)") + "\n")
-		}
-		for idx, c := range d.children {
-			fmt.Fprintf(&b, "  %d. %s [%s] %s\n", idx+1, cleanLine(c.ID), c.Status, cleanLine(c.Subject))
+		if d.childErr != nil {
+			// Distinguish a load failure from a genuinely childless plan.
+			fmt.Fprintf(&b, "\n%s\n", styles.section.Render("Tracers (unavailable)"))
+			b.WriteString(styles.dim.Render("  could not load tracers: "+cleanLine(d.childErr.Error())) + "\n")
+		} else {
+			fmt.Fprintf(&b, "\n%s\n", styles.section.Render(fmt.Sprintf("Tracers (%d)", len(d.children))))
+			if len(d.children) == 0 {
+				b.WriteString(styles.dim.Render("  (none)") + "\n")
+			}
+			for idx, c := range d.children {
+				fmt.Fprintf(&b, "  %d. %s [%s] %s\n", idx+1, cleanLine(c.ID), c.Status, cleanLine(c.Subject))
+			}
 		}
 	}
 

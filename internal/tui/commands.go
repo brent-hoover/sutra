@@ -136,6 +136,8 @@ func (m *Model) loadDetailCmd(id string, gen int) tea.Cmd {
 		if ir.Issue.Type == domain.TypePlan {
 			if lr, err := c.ListIssues(ctx, map[string]string{"parent": id}); err == nil {
 				d.children = lr.Issues
+			} else {
+				d.childErr = err // recorded so the tracer section renders "unavailable", not empty
 			}
 		}
 		return detailLoadedMsg{gen: gen, detail: d}

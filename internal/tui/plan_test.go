@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -93,6 +94,18 @@ func TestRenderDetailShowsTracers(t *testing.T) {
 	// A non-plan issue shows no Tracers section.
 	if strings.Contains(planDetailModel(domain.TypeTask, "").renderDetail(), "Tracers") {
 		t.Error("non-plan detail should not show a Tracers section")
+	}
+}
+
+func TestRenderDetailShowsTracersUnavailableOnLoadError(t *testing.T) {
+	m := planDetailModel(domain.TypePlan, domain.ApprovalApproved)
+	m.detail.childErr = errors.New("daemon returned 503")
+	out := m.renderDetail()
+	if !strings.Contains(out, "Tracers (unavailable)") || !strings.Contains(out, "503") {
+		t.Errorf("expected tracer section to report the load failure:\n%s", out)
+	}
+	if strings.Contains(out, "Tracers (0)") {
+		t.Errorf("a load failure must not read as an empty tracer list:\n%s", out)
 	}
 }
 
